@@ -1,7 +1,7 @@
 # Build context is the repo root (see docker-compose.yml) so this image can
-# also carry ai/face_recognition/ — backend/app/services/face_service.py
-# imports it in-process at runtime and needs it as a sibling of backend/,
-# same layout as the local dev checkout.
+# also carry ai/face_recognition/ and ai/fraud_detection/ — both imported
+# in-process at runtime (face_service.py, attendance_service.py) and need to
+# be siblings of backend/, same layout as the local dev checkout.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend/ backend/
 COPY ai/face_recognition/ ai/face_recognition/
+COPY ai/fraud_detection/ ai/fraud_detection/
 
 WORKDIR /app/backend
 

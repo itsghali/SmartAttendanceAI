@@ -126,6 +126,10 @@ class FaceProfileNotFoundError(DomainError):
     pass
 
 
+class FaceProfileCorruptedError(DomainError):
+    pass
+
+
 class FaceMismatchError(DomainError):
     pass
 

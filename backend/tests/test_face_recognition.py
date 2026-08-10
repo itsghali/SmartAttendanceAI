@@ -2,8 +2,10 @@ import logging
 from types import SimpleNamespace
 
 import pytest
+from cryptography.fernet import Fernet
 
 from app.config.settings import get_settings
+from app.core import crypto
 from app.services import face_service
 from tests.conftest import login, promote_to_role, register_and_verify
 
@@ -183,6 +185,43 @@ async def test_reenroll_replaces_embedding(client, db_session, caplog, unique_em
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_verify_corrupted_profile_returns_503_not_404(
+    client, db_session, caplog, unique_email, monkeypatch
+):
+    """Distinguishes 'enrolled but undecryptable' (503, re-enroll) from
+    'never enrolled' (404) — see PLAN.md item 5's Eng review. Simulated by
+    encrypting the enrollment under a since-fully-rotated-out key."""
+    hr_headers, employee_headers, employee_id = await _setup_employee(
+        client, db_session, caplog, unique_email
+    )
+    # Clean cipher state before enrolling — crypto._get_cipher is a shared,
+    # process-wide cache with no per-test isolation of its own.
+    crypto._get_cipher.cache_clear()
+    _mock_analyze(monkeypatch, result=SimpleNamespace(embedding=_embedding(1.0), liveness=0.9))
+    await client.post(f"/face/enroll/{employee_id}", files=[("photos", _photo())], headers=hr_headers)
+
+    # Rotate to a key that never saw the enrollment above — the stored
+    # ciphertext becomes undecryptable, same as a corrupted row. Mutates the
+    # already-cached Settings singleton (not env + cache_clear) so this
+    # doesn't also undo the autouse fixture's face_verification_enabled=True
+    # (get_settings.cache_clear() would rebuild a fresh Settings() without it).
+    new_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(get_settings(), "face_embedding_encryption_keys", [new_key])
+    crypto._get_cipher.cache_clear()
+    try:
+        _mock_analyze(monkeypatch, result=SimpleNamespace(embedding=_embedding(1.0), liveness=0.9))
+        resp = await client.post("/face/verify", files=[("photo", _photo())], headers=employee_headers)
+
+        assert resp.status_code == 503, resp.text
+        assert "re-enrollment" in resp.json()["detail"]
+    finally:
+        # crypto._get_cipher is a process-wide cache — leaving it primed
+        # with this test's throwaway key would break every later test that
+        # doesn't explicitly clear it first.
+        crypto._get_cipher.cache_clear()
 
 
 @pytest.mark.asyncio

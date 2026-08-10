@@ -16,6 +16,7 @@ from app.core.exceptions import (
     EmployeeNotFoundError,
     FaceMismatchError,
     FaceModelUnavailableError,
+    FaceProfileCorruptedError,
     FaceProfileNotFoundError,
     ImpossibleTravelError,
     InvalidImageError,
@@ -146,7 +147,7 @@ async def check_in(
         )
     except _CONFLICT_ERRORS as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except FaceModelUnavailableError as exc:
+    except (FaceModelUnavailableError, FaceProfileCorruptedError) as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except (*_BAD_REQUEST_ERRORS, *_FACE_ACTION_ERRORS) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -173,7 +174,7 @@ async def check_out(
         )
     except _CONFLICT_ERRORS as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except FaceModelUnavailableError as exc:
+    except (FaceModelUnavailableError, FaceProfileCorruptedError) as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except (*_BAD_REQUEST_ERRORS, *_FACE_ACTION_ERRORS) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -223,7 +224,7 @@ async def start_break(
         )
     except _CONFLICT_ERRORS as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except FaceModelUnavailableError as exc:
+    except (FaceModelUnavailableError, FaceProfileCorruptedError) as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except (*_BAD_REQUEST_ERRORS, *_FACE_ACTION_ERRORS) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -250,7 +251,7 @@ async def end_break(
         )
     except _CONFLICT_ERRORS as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except FaceModelUnavailableError as exc:
+    except (FaceModelUnavailableError, FaceProfileCorruptedError) as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except (*_BAD_REQUEST_ERRORS, *_FACE_ACTION_ERRORS) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

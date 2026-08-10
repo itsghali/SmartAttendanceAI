@@ -29,6 +29,21 @@ if settings.environment == "production" and (
         "set a random secret of at least 32 characters."
     )
 
+# Same reasoning as the JWT guard above — the default embedding-encryption
+# key is a fixed, obviously-fake placeholder committed in this repo's
+# source; using it in production would mean biometric embeddings are
+# encrypted with a key anyone can read from GitHub, not a real control.
+_DEFAULT_FACE_EMBEDDING_KEY = "24xm4P3u0ka-ik3EZdt9dX8M1t-Rb3YAMoUeXD6x1ow="
+if settings.environment == "production" and (
+    not settings.face_embedding_encryption_keys
+    or _DEFAULT_FACE_EMBEDDING_KEY in settings.face_embedding_encryption_keys
+):
+    raise RuntimeError(
+        "FACE_EMBEDDING_ENCRYPTION_KEYS is unset or still contains the default "
+        "placeholder key for a production deploy — set at least one real "
+        "Fernet key (Fernet.generate_key())."
+    )
+
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
 app.add_middleware(

@@ -14,12 +14,14 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from cryptography.fernet import InvalidToken
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import Settings, get_settings
 from app.core.exceptions import (
     FaceMismatchError,
     FaceModelUnavailableError,
+    FaceProfileCorruptedError,
     FaceProfileNotFoundError,
     InvalidImageError,
     LivenessCheckFailedError,
@@ -190,7 +192,26 @@ class FaceService:
                 "enrolled profile is incompatible with the current face model; re-enrollment required"
             )
 
-        similarity = _cosine_similarity(result.embedding, profile.embedding)
+        try:
+            stored_embedding = profile.embedding
+        except InvalidToken as exc:
+            # No configured decryption key can read this profile's stored
+            # embedding — key rotated out, or corrupted data. Distinguished
+            # from FaceProfileNotFoundError (see PLAN.md item 5's Eng
+            # review) since this employee IS enrolled; the fix is
+            # re-enrollment, not treating them as never having enrolled.
+            await self._repo.record_attempt(
+                employee_id,
+                None,
+                result.liveness,
+                False,
+                FaceVerificationFailureReason.PROFILE_CORRUPTED,
+            )
+            raise FaceProfileCorruptedError(
+                "enrolled profile could not be read; re-enrollment required"
+            ) from exc
+
+        similarity = _cosine_similarity(result.embedding, stored_embedding)
         passed = similarity >= self._settings.face_similarity_threshold
         await self._repo.record_attempt(
             employee_id,

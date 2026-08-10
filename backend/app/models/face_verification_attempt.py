@@ -16,6 +16,7 @@ class FaceVerificationFailureReason(str, enum.Enum):
     LOW_SIMILARITY = "low_similarity"
     LIVENESS_FAILED = "liveness_failed"
     MODEL_UNAVAILABLE = "model_unavailable"
+    PROFILE_CORRUPTED = "profile_corrupted"
 
 
 class FaceVerificationAttempt(Base, UUIDPrimaryKeyMixin, TimestampMixin):

@@ -76,6 +76,16 @@ class Settings(BaseSettings):
     face_action_rate_limit_per_window: int = Field(default=10)
     face_action_rate_limit_window_seconds: int = Field(default=60)
 
+    # Application-layer encryption for FaceProfile.embedding at rest (see
+    # PLAN.md item 5). Newest key first — encryption always uses the first
+    # key; decryption tries each in order, so rotation is "prepend a new key,
+    # keep the old one" with no forced re-encryption migration. The default
+    # is an obviously-fake placeholder (same convention as jwt_secret_key's
+    # "change-me-in-.env"), guarded against in production at boot (main.py).
+    face_embedding_encryption_keys: list[str] = Field(
+        default_factory=lambda: ["24xm4P3u0ka-ik3EZdt9dX8M1t-Rb3YAMoUeXD6x1ow="]
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
