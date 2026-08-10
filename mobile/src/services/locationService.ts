@@ -5,6 +5,11 @@ export interface CurrentPosition {
   latitude: number;
   longitude: number;
   accuracyMeters: number | null;
+  // Android-only (expo-location's `mocked` field, undefined on iOS/web —
+  // treated as false there, not as "unknown"). A weak, client-spoofable
+  // signal on its own; the backend still enforces on it server-side (see
+  // PLAN.md T1) so a modified UI alone can't bypass the check.
+  isMocked: boolean;
 }
 
 export class LocationPermissionDeniedError extends Error {
@@ -206,7 +211,7 @@ function readDevLocationOverride(): CurrentPosition | null {
   console.warn(
     `[locationService] DEV LOCATION OVERRIDE ACTIVE: ${latitude}, ${longitude} — real GPS is not being used.`,
   );
-  return { latitude, longitude, accuracyMeters: 10 };
+  return { latitude, longitude, accuracyMeters: 10, isMocked: false };
 }
 
 /**
@@ -295,6 +300,7 @@ function toCurrentPosition(position: Location.LocationObject): CurrentPosition {
     longitude: position.coords.longitude,
     // Null on web when the platform does not report it (v57 LocationObjectCoords).
     accuracyMeters: position.coords.accuracy ?? null,
+    isMocked: position.mocked ?? false,
   };
 }
 

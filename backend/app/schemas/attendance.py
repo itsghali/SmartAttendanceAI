@@ -14,11 +14,20 @@ class CheckInRequest(BaseModel):
     # Base64-encoded selfie JPEG/PNG. Optional so this stays a pure additive
     # change — required only when FACE_VERIFICATION_ENABLED is on, enforced
     # in AttendanceService.check_in, not here (schema doesn't know settings).
+<<<<<<< HEAD
     # max_length is a coarse parse-time ceiling (~11MB decoded) independent of
     # settings; the real cap against face_max_upload_size_mb is enforced in
     # AttendanceService._verify_face_or_raise before the image reaches the
     # face pipeline, mirroring face.py's multipart-upload validation.
     selfie_base64: str | None = Field(default=None, max_length=15_000_000)
+=======
+    selfie_base64: str | None = Field(default=None)
+    # Self-reported by the client (expo-location's Android-only `mocked`
+    # flag) — only used on check-in, see PLAN.md T1. A weak, spoofable
+    # signal on its own, still enforced server-side so a modified UI alone
+    # can't bypass it.
+    is_mock_location: bool = Field(default=False)
+>>>>>>> bc653476d5cce77afb7b5096ce66fc3a03a51456
 
 
 class CheckOutRequest(CheckInRequest):
