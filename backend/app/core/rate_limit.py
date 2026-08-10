@@ -1,11 +1,14 @@
+import logging
 from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Request, status
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.config.settings import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -24,9 +27,16 @@ class RateLimiter:
 
     async def check(self, identifier: str) -> None:
         key = f"ratelimit:{self._key_prefix}:{identifier}"
-        current = await self._redis.incr(key)
-        if current == 1:
-            await self._redis.expire(key, self._window_seconds)
+        # Fail-open on purpose: Redis being down must not take auth, check-in,
+        # and face-verify down with it. A rate-limit outage is a much smaller
+        # blast radius than a login/attendance outage.
+        try:
+            current = await self._redis.incr(key)
+            if current == 1:
+                await self._redis.expire(key, self._window_seconds)
+        except RedisError:
+            logger.warning("rate limiter unavailable (%s) — failing open", self._key_prefix)
+            return
         if current > self._limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

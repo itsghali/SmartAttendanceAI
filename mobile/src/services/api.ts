@@ -45,10 +45,21 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const config = error.config as RetriableConfig | undefined;
 
-    if (error.response?.status !== 401 || !config || config._retried) {
+    if (error.response?.status !== 401 || !config) {
       throw error;
     }
     if (config.url?.includes("/auth/refresh") || config.url?.includes("/auth/login")) {
+      throw error;
+    }
+    if (config._retried) {
+      // Refresh already succeeded once for this request and the retry with
+      // the new access token STILL 401'd — the refresh token itself must
+      // have been invalidated since (revoked on another device, password
+      // change, admin action). Without this, auth.status stays
+      // "authenticated" forever: every subsequent call silently 401s and
+      // there is no path back to the login screen.
+      await clearTokens();
+      onSessionExpired?.();
       throw error;
     }
 

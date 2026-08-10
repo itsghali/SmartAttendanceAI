@@ -3,6 +3,7 @@ import { AxiosError } from "axios";
 
 import * as attendanceService from "../services/attendanceService";
 import { getCurrentPosition } from "../services/locationService";
+import { logout, sessionExpired } from "./authSlice";
 import type { Attendance, BreakPeriod } from "../services/attendanceService";
 
 export type AttendanceActionStatus = "idle" | "locating" | "submitting";
@@ -151,6 +152,15 @@ const attendanceSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
+    // Field devices are shared between employees (see authSlice's
+    // restoreSession comment) — without this, the next employee to log in on
+    // the same device briefly sees the previous employee's check-in time,
+    // geofence events, and open-break state until fetchToday overwrites it
+    // (or forever, if that fetch fails).
+    builder
+      .addCase(logout.fulfilled, () => initialState)
+      .addCase(sessionExpired, () => initialState);
+
     builder
       .addCase(fetchToday.pending, (state) => {
         state.loadStatus = "loading";

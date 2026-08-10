@@ -18,6 +18,17 @@ from app.routes import (
 configure_logging()
 settings = get_settings()
 
+# A misconfigured deploy that forgets to set JWT_SECRET_KEY must fail loudly
+# at boot, not silently sign every access token with a value anyone can read
+# in this repo's source.
+if settings.environment == "production" and (
+    settings.jwt_secret_key == "change-me-in-.env" or len(settings.jwt_secret_key) < 32
+):
+    raise RuntimeError(
+        "JWT_SECRET_KEY is unset or too short for a production deploy — "
+        "set a random secret of at least 32 characters."
+    )
+
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
 app.add_middleware(

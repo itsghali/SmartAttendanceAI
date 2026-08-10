@@ -129,8 +129,41 @@ async def test_refresh_rotates_token_and_old_one_stops_working(client, caplog, u
     reuse_old = await client.post("/auth/refresh", json={"refresh_token": old_refresh})
     assert reuse_old.status_code == 401
 
+    # Replaying an already-rotated (revoked) refresh token is a theft/replay
+    # signal, not an ordinary error — AuthService.refresh() now kills every
+    # session for the user when this happens, so the otherwise-still-valid
+    # new_refresh from the legitimate rotation above is invalidated too.
+    # This is intentional (see backend audit P1 #3): the alternative is
+    # letting a stolen token's replay pass silently while only the attacker's
+    # own reuse attempt gets rejected.
     reuse_new = await client.post("/auth/refresh", json={"refresh_token": new_refresh})
-    assert reuse_new.status_code == 200
+    assert reuse_new.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_of_revoked_token_kills_whole_session_family(
+    client, caplog, unique_email
+):
+    await _register_and_verify(client, caplog, unique_email)
+    login = await client.post(
+        "/auth/login", json={"email": unique_email, "password": "Password123"}
+    )
+    first_refresh = login.json()["refresh_token"]
+
+    rotated = await client.post("/auth/refresh", json={"refresh_token": first_refresh})
+    assert rotated.status_code == 200
+    second_refresh = rotated.json()["refresh_token"]
+
+    # Simulates an attacker replaying a stolen (and since-rotated) token.
+    replay = await client.post("/auth/refresh", json={"refresh_token": first_refresh})
+    assert replay.status_code == 401
+
+    # The legitimate device's own still-valid token is also dead now — the
+    # whole family was killed, not just the replayed one.
+    legitimate_followup = await client.post(
+        "/auth/refresh", json={"refresh_token": second_refresh}
+    )
+    assert legitimate_followup.status_code == 401
 
 
 @pytest.mark.asyncio

@@ -99,7 +99,17 @@ class AuthService:
 
     async def refresh(self, raw_refresh_token: str) -> tuple[str, str]:
         token = await self._refresh_tokens.get_by_hash(hash_opaque_token(raw_refresh_token))
-        if token is None or not token.is_active:
+        if token is None:
+            raise InvalidRefreshTokenError("refresh token is invalid, expired, or revoked")
+        if not token.is_active:
+            # A token that was already revoked (not merely expired) being
+            # presented again means either a replayed request or a stolen
+            # token that the legitimate device already rotated past — theft
+            # cannot be told apart from replay here, so treat both the same
+            # way: kill every session for this user rather than let a thief
+            # keep the one valid chain that resulted from the theft.
+            if token.revoked_at is not None:
+                await self._refresh_tokens.revoke_all_for_user(token.user_id)
             raise InvalidRefreshTokenError("refresh token is invalid, expired, or revoked")
 
         user = await self._users.get_by_id(token.user_id)

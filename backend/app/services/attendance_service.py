@@ -117,6 +117,15 @@ class AttendanceService:
             image_bytes = base64.b64decode(selfie_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise InvalidImageError("selfie_base64 is not valid base64") from exc
+        # Same size cap /face/enroll and /face/verify enforce on their multipart
+        # uploads (face.py's _read_and_validate) — without it, this JSON path
+        # could decode an arbitrarily large image and feed it straight into the
+        # CPU-bound ONNX pipeline on every check-in/check-out/break call.
+        max_bytes = self._settings.face_max_upload_size_mb * 1024 * 1024
+        if len(image_bytes) > max_bytes:
+            raise InvalidImageError(
+                f"image exceeds max size of {self._settings.face_max_upload_size_mb}MB"
+            )
         # Raises FaceProfileNotFoundError / LivenessCheckFailedError /
         # FaceMismatchError / NoFaceDetectedError / MultipleFacesDetectedError /
         # InvalidImageError / FaceModelUnavailableError — all propagate to the
