@@ -74,6 +74,14 @@ class PoorLocationAccuracyError(DomainError):
     pass
 
 
+class MockLocationDetectedError(DomainError):
+    pass
+
+
+class ImpossibleTravelError(DomainError):
+    pass
+
+
 class AlreadyCheckedInError(DomainError):
     pass
 

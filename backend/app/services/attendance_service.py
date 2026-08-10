@@ -1,7 +1,9 @@
 import base64
 import binascii
+import sys
 import uuid
 from datetime import date, datetime
+from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,11 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.settings import get_settings
 from app.core.exceptions import (
     AlreadyCheckedInError,
-    AlreadyCheckedOutError,
     BreakAlreadyActiveError,
     BreakStillActiveError,
     EmployeeNotFoundError,
+    ImpossibleTravelError,
     InvalidImageError,
+    MockLocationDetectedError,
     NoActiveBreakError,
     NoActiveGeofenceError,
     NotCheckedInError,
@@ -38,6 +41,17 @@ from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.geofence_event_repository import GeofenceEventRepository
 from app.repositories.geofence_repository import GeofenceRepository
 from app.services.face_service import FaceService
+
+# Same in-process import technique face_service.py already uses for ai/
+# face_recognition — no new deployment topology. Safe to repeat here even
+# though face_service.py (imported above) already does this insert: sys.path
+# is process-global, but this module must not implicitly depend on import
+# order to get ai/ on the path.
+_AI_DIR = Path(__file__).resolve().parents[3] / "ai"
+if str(_AI_DIR) not in sys.path:
+    sys.path.insert(0, str(_AI_DIR))
+
+from fraud_detection.services.impossible_travel import impossible_travel_risk  # noqa: E402
 
 
 class AttendanceService:
@@ -79,6 +93,55 @@ class AttendanceService:
             raise PoorLocationAccuracyError(
                 f"GPS accuracy {accuracy_meters}m exceeds the "
                 f"{self._settings.attendance_max_accuracy_meters}m maximum"
+            )
+
+    def _check_mock_location_or_raise(self, is_mock_location: bool) -> None:
+        # Self-reported by the mobile client (expo-location's Android-only
+        # `mocked` flag) — a weak, client-spoofable signal on its own (a
+        # rooted device can fake the flag itself), but still worth enforcing
+        # server-side so a modified UI alone can't bypass it; must still
+        # tamper with the request body, same bar as every other check here.
+        if self._settings.mock_location_check_enabled and is_mock_location:
+            raise MockLocationDetectedError(
+                "this device is reporting a mocked/fake location — check-in refused"
+            )
+
+    async def _check_impossible_travel_or_raise(
+        self, employee: Employee, position: Coordinates, check_in_at: datetime
+    ) -> None:
+        if not self._settings.impossible_travel_check_enabled:
+            return
+        last = await self._attendance.get_last_completed_for_employee(employee.id)
+        if (
+            last is None
+            or last.check_out_latitude is None
+            or last.check_out_longitude is None
+            or last.check_out_at is None
+        ):
+            # No prior session, or the only prior session(s) are manual/backfilled
+            # entries with no coordinates — nothing to compare against, no-op.
+            return
+
+        check_out_at = last.check_out_at
+        if check_out_at.tzinfo is None:
+            # SQLite round-trips DateTime(timezone=True) as naive (see
+            # Attendance.monitoring_status for the same normalization).
+            check_out_at = check_out_at.replace(tzinfo=check_in_at.tzinfo)
+        elapsed_hours = (check_in_at - check_out_at).total_seconds() / 3600
+        if elapsed_hours < self._settings.impossible_travel_min_elapsed_minutes / 60:
+            # Too little elapsed time to distinguish real travel from GPS
+            # jitter on a near-identical position — skip, not loosen.
+            return
+
+        last_position = Coordinates(last.check_out_latitude, last.check_out_longitude)
+        distance_km = haversine_distance_meters(position, last_position) / 1000
+        risk = impossible_travel_risk(
+            distance_km, elapsed_hours, self._settings.impossible_travel_max_speed_kmh
+        )
+        if risk > 0.0:
+            raise ImpossibleTravelError(
+                f"check-in implies {distance_km:.1f}km in {elapsed_hours:.2f}h since your last "
+                "check-out — that speed isn't physically plausible"
             )
 
     async def _match_or_raise(
@@ -130,18 +193,23 @@ class AttendanceService:
         longitude: float,
         accuracy_meters: float | None,
         selfie_base64: str | None = None,
+        is_mock_location: bool = False,
     ) -> Attendance:
-        today = utcnow().date()
+        check_in_at = utcnow()
+        today = check_in_at.date()
         # An employee works several chantiers a day, so the limit is not one
         # check-in per day — it is one OPEN session at a time.
         if await self._attendance.get_open_for_employee(employee.id) is not None:
             raise AlreadyCheckedInError("check out of your current site before checking in again")
 
         self._check_accuracy(accuracy_meters)
-        matched = await self._match_or_raise(employee, Coordinates(latitude, longitude))
-        # Geofence match (cheap) already passed above before this runs the ML
-        # pipeline — no wasted face compute on a check-in that was going to be
-        # rejected anyway.
+        self._check_mock_location_or_raise(is_mock_location)
+        position = Coordinates(latitude, longitude)
+        matched = await self._match_or_raise(employee, position)
+        # Impossible-travel and geofence match are both cheap — both run
+        # before the ML pipeline so no face compute is wasted on a check-in
+        # that was going to be rejected anyway.
+        await self._check_impossible_travel_or_raise(employee, position, check_in_at)
         await self._verify_face_or_raise(employee, selfie_base64)
 
         # No same-site restriction on purpose. Returning to the site just left —
@@ -158,7 +226,7 @@ class AttendanceService:
             attendance = await self._attendance.create_check_in(
                 employee_id=employee.id,
                 attendance_date=today,
-                check_in_at=utcnow(),
+                check_in_at=check_in_at,
                 latitude=latitude,
                 longitude=longitude,
                 accuracy_meters=accuracy_meters,

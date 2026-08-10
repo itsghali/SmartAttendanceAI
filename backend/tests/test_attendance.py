@@ -1,6 +1,7 @@
 import base64
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -263,6 +264,111 @@ async def test_check_in_poor_accuracy_rejected(client, db_session, caplog, uniqu
         headers=headers,
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_check_in_mock_location_rejected(client, db_session, caplog, unique_email):
+    employee_access, _, _ = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+
+    resp = await client.post(
+        "/attendance/check-in",
+        json={
+            "latitude": OFFICE_LAT,
+            "longitude": OFFICE_LNG,
+            "accuracy_meters": 10,
+            "is_mock_location": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 400
+    assert "mocked/fake location" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_check_in_impossible_travel_blocked(client, db_session, caplog, unique_email):
+    """Check out at site A, backdate that check-out by 10 minutes (HR
+    correction — real wall-clock elapsed time in a test run is milliseconds,
+    not enough to exceed the plausible-speed threshold on its own), then
+    check in ~22km away at site B. 22km / ~10min implies >120km/h — blocked."""
+    employee_access, _, hr_headers = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+    site_b_lat = OFFICE_LAT + 0.2  # ~22km north — well beyond any plausible
+    # 10-minute ground-travel distance, and well outside FAR_LAT's 1.5km.
+    await _create_geofence(
+        client, hr_headers, name="Chantier B", center_latitude=site_b_lat, center_longitude=OFFICE_LNG
+    )
+
+    check_in_resp = await client.post(
+        "/attendance/check-in",
+        json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG},
+        headers=headers,
+    )
+    assert check_in_resp.status_code == 201
+    attendance_id = check_in_resp.json()["id"]
+    check_out_resp = await client.post(
+        "/attendance/check-out",
+        json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG},
+        headers=headers,
+    )
+    assert check_out_resp.status_code == 200
+
+    backdated = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    correction = await client.patch(
+        f"/attendance/{attendance_id}",
+        json={"check_out_at": backdated},
+        headers=hr_headers,
+    )
+    assert correction.status_code == 200
+
+    resp = await client.post(
+        "/attendance/check-in",
+        json={"latitude": site_b_lat, "longitude": OFFICE_LNG},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+    assert "physically plausible" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_check_in_impossible_travel_skipped_within_min_elapsed_floor(
+    client, db_session, caplog, unique_email
+):
+    """A real (not backdated) check-out immediately followed by a check-in far
+    away has real elapsed time in the millisecond range — below the 5-minute
+    floor, so the check is skipped entirely rather than computing an inflated
+    speed off a near-zero denominator. This is a deliberate blind spot (see
+    PLAN.md T1 edge cases), not a bug: the alternative is false-positive
+    blocking on GPS-jitter-scale double-submits."""
+    employee_access, _, hr_headers = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+    site_b_lat = OFFICE_LAT + 0.2
+    await _create_geofence(
+        client, hr_headers, name="Chantier B", center_latitude=site_b_lat, center_longitude=OFFICE_LNG
+    )
+
+    await client.post(
+        "/attendance/check-in",
+        json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG},
+        headers=headers,
+    )
+    await client.post(
+        "/attendance/check-out",
+        json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG},
+        headers=headers,
+    )
+    resp = await client.post(
+        "/attendance/check-in",
+        json={"latitude": site_b_lat, "longitude": OFFICE_LNG},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
 
 
 @pytest.mark.asyncio

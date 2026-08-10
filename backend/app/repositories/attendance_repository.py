@@ -79,6 +79,26 @@ class AttendanceRepository:
         result = await self._session.execute(stmt)
         return result.scalars().first()
 
+    async def get_last_completed_for_employee(self, employee_id: uuid.UUID) -> Attendance | None:
+        """Most recent CLOSED session (check_out_at is not None), regardless of
+        date — the "last known position" for impossible-travel comparison
+        against a new check-in. Manual/backfilled entries have no check_out
+        coordinates (see create_manual_entry) and are naturally skipped by the
+        caller checking check_out_latitude/longitude for None, not filtered
+        out of this query itself."""
+        stmt = (
+            select(Attendance)
+            .options(*_EAGER)
+            .where(
+                Attendance.employee_id == employee_id,
+                Attendance.check_out_at.is_not(None),
+            )
+            .order_by(Attendance.check_out_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalars().first()
+
     async def get_open_for_employee(self, employee_id: uuid.UUID) -> Attendance | None:
         """The session the employee is currently inside, if any.
 

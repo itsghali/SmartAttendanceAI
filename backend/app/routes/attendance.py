@@ -17,8 +17,10 @@ from app.core.exceptions import (
     FaceMismatchError,
     FaceModelUnavailableError,
     FaceProfileNotFoundError,
+    ImpossibleTravelError,
     InvalidImageError,
     LivenessCheckFailedError,
+    MockLocationDetectedError,
     MultipleFacesDetectedError,
     NoActiveBreakError,
     NoActiveGeofenceError,
@@ -57,7 +59,13 @@ _CONFLICT_ERRORS = (
     NotCheckedInError,
     BreakStillActiveError,
 )
-_BAD_REQUEST_ERRORS = (OutsideGeofenceError, PoorLocationAccuracyError, NoActiveGeofenceError)
+_BAD_REQUEST_ERRORS = (
+    OutsideGeofenceError,
+    PoorLocationAccuracyError,
+    NoActiveGeofenceError,
+    MockLocationDetectedError,
+    ImpossibleTravelError,
+)
 # A rejected check-in/check-out/break action is a request failure here,
 # unlike the standalone /face/verify endpoint (which answers 200
 # {verified:false} because a face mismatch there isn't gating anything else)
@@ -128,7 +136,12 @@ async def check_in(
     employee = await _resolve_employee(user, session)
     try:
         attendance = await AttendanceService(session).check_in(
-            employee, body.latitude, body.longitude, body.accuracy_meters, body.selfie_base64
+            employee,
+            body.latitude,
+            body.longitude,
+            body.accuracy_meters,
+            body.selfie_base64,
+            body.is_mock_location,
         )
     except _CONFLICT_ERRORS as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

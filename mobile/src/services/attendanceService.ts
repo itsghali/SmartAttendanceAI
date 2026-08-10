@@ -68,6 +68,10 @@ interface CheckInPayload {
   // check-out, break/start, break/end when the server has
   // FACE_VERIFICATION_ENABLED on; a harmless no-op field otherwise.
   selfie_base64?: string;
+  // Only enforced by the backend on check-in (see PLAN.md T1) — a harmless
+  // unused field on the other three actions, kept on the shared payload
+  // shape rather than a second interface for one field.
+  is_mock_location?: boolean;
 }
 
 interface LocationPingPayload {

@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     attendance_action_rate_limit_per_window: int = Field(default=20)
     attendance_action_rate_limit_window_seconds: int = Field(default=60)
 
+    # GPS-spoof detection (see PLAN.md T1 — approved to block, not just log).
+    # Both checks run on check-in only, before face verification (cheap before
+    # expensive) and before the check-in row is created (fail closed).
+    mock_location_check_enabled: bool = Field(default=True)
+    impossible_travel_check_enabled: bool = Field(default=True)
+    impossible_travel_max_speed_kmh: float = Field(default=120.0)
+    # Below this, a real ping-rate elapsed time is too close to GPS-jitter
+    # scale to judge — a few meters of accuracy noise over a few seconds of
+    # elapsed time can compute an inflated speed with a genuinely ~0 distance
+    # double-submit. The check is skipped entirely below this floor, not
+    # loosened — see PLAN.md Eng review, item 1 edge cases.
+    impossible_travel_min_elapsed_minutes: float = Field(default=5.0)
+
     # Face recognition (standalone enrollment + verification, not yet wired into
     # check-in — see TODOS.md "Face Enrollment + Face-Gated Check-in"). Kill switch
     # lets the endpoints be disabled without a redeploy if the model misbehaves.

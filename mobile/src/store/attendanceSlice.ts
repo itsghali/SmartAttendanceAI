@@ -61,6 +61,7 @@ export const checkIn = createAsyncThunk(
         longitude: position.longitude,
         accuracy_meters: position.accuracyMeters,
         selfie_base64: selfieBase64,
+        is_mock_location: position.isMocked,
       });
     } catch (error) {
       return rejectWithValue(extractErrorMessage(error));

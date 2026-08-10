@@ -18,7 +18,7 @@ function buildStore() {
   return configureStore({ reducer: { attendance: attendanceReducer } });
 }
 
-const POSITION = { latitude: 36.8065, longitude: 10.1815, accuracyMeters: 10 };
+const POSITION = { latitude: 36.8065, longitude: 10.1815, accuracyMeters: 10, isMocked: false };
 
 describe("attendanceSlice", () => {
   beforeEach(() => {
@@ -53,9 +53,32 @@ describe("attendanceSlice", () => {
       longitude: POSITION.longitude,
       accuracy_meters: POSITION.accuracyMeters,
       selfie_base64: "base64-selfie-data",
+      is_mock_location: false,
     });
     expect(store.getState().attendance.today).toEqual(record);
     expect(store.getState().attendance.actionStatus).toBe("idle");
+  });
+
+  it("checkIn forwards isMocked=true so the backend can refuse a spoofed GPS fix", async () => {
+    (locationService.getCurrentPosition as jest.Mock).mockResolvedValue({
+      ...POSITION,
+      isMocked: true,
+    });
+    const axiosError = new AxiosError("Request failed");
+    axiosError.response = {
+      data: { detail: "this device is reporting a mocked/fake location — check-in refused" },
+    } as any;
+    (attendanceService.checkIn as jest.Mock).mockRejectedValue(axiosError);
+
+    const store = buildStore();
+    await store.dispatch(checkIn("base64-selfie-data"));
+
+    expect(attendanceService.checkIn).toHaveBeenCalledWith(
+      expect.objectContaining({ is_mock_location: true }),
+    );
+    expect(store.getState().attendance.actionError).toBe(
+      "this device is reporting a mocked/fake location — check-in refused",
+    );
   });
 
   it("checkIn surfaces the backend's geofence rejection detail on failure", async () => {

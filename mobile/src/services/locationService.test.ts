@@ -71,7 +71,12 @@ describe("locationService dev location override", () => {
 
     const position = await loadService().getCurrentPosition();
 
-    expect(position).toEqual({ latitude: 33.5731, longitude: -7.5898, accuracyMeters: 10 });
+    expect(position).toEqual({
+      latitude: 33.5731,
+      longitude: -7.5898,
+      accuracyMeters: 10,
+      isMocked: false,
+    });
     // Real GPS must not even be consulted when the override is active.
     expect(Location.getCurrentPositionAsync).not.toHaveBeenCalled();
   });
@@ -270,7 +275,34 @@ describe("locationService dev location override", () => {
       latitude: 36.8065,
       longitude: 10.1815,
       accuracyMeters: null,
+      isMocked: false,
     });
+  });
+
+  it("SECURITY: flags a mocked GPS fix as isMocked, Android's mock-location signal", async () => {
+    delete process.env.EXPO_PUBLIC_DEV_LOCATION;
+    (Location.getForegroundPermissionsAsync as jest.Mock).mockResolvedValue({
+      status: "granted",
+      canAskAgain: false,
+    });
+    (Location.getCurrentPositionAsync as jest.Mock).mockResolvedValue({
+      coords: { latitude: 36.8065, longitude: 10.1815, accuracy: 5 },
+      timestamp: Date.now(),
+      mocked: true,
+    });
+
+    const position = await loadService().getCurrentPosition();
+
+    expect(position.isMocked).toBe(true);
+  });
+
+  it("treats a fix with no `mocked` field (iOS/web) as isMocked=false, not unknown", async () => {
+    delete process.env.EXPO_PUBLIC_DEV_LOCATION;
+    mockRealGps(36.8065, 10.1815);
+
+    const position = await loadService().getCurrentPosition();
+
+    expect(position.isMocked).toBe(false);
   });
 
   it("maps POSITION_UNAVAILABLE and TIMEOUT to actionable copy", async () => {

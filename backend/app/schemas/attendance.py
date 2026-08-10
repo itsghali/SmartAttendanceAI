@@ -15,6 +15,11 @@ class CheckInRequest(BaseModel):
     # change — required only when FACE_VERIFICATION_ENABLED is on, enforced
     # in AttendanceService.check_in, not here (schema doesn't know settings).
     selfie_base64: str | None = Field(default=None)
+    # Self-reported by the client (expo-location's Android-only `mocked`
+    # flag) — only used on check-in, see PLAN.md T1. A weak, spoofable
+    # signal on its own, still enforced server-side so a modified UI alone
+    # can't bypass it.
+    is_mock_location: bool = Field(default=False)
 
 
 class CheckOutRequest(CheckInRequest):

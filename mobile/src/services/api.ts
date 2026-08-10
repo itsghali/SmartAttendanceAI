@@ -9,8 +9,17 @@ export function setSessionExpiredHandler(handler: () => void): void {
   onSessionExpired = handler;
 }
 
+/**
+ * Without this, an unreachable backend (wrong LAN IP, dead tunnel, phone on
+ * the wrong Wi-Fi) hangs on the OS's own connect timeout — 60s+ on mobile —
+ * with the button just spinning and no error surfaced for the whole wait.
+ * Same order of magnitude as locationService.ts's POSITION_TIMEOUT_MS.
+ */
+const API_TIMEOUT_MS = 15_000;
+
 export const api = axios.create({
   baseURL: getApiBaseUrl(),
+  timeout: API_TIMEOUT_MS,
 });
 
 api.interceptors.request.use(async (config) => {
@@ -32,9 +41,11 @@ async function refreshAccessToken(): Promise<string> {
   if (!refreshToken) {
     throw new Error("no refresh token available");
   }
-  const response = await axios.post(`${getApiBaseUrl()}/auth/refresh`, {
-    refresh_token: refreshToken,
-  });
+  const response = await axios.post(
+    `${getApiBaseUrl()}/auth/refresh`,
+    { refresh_token: refreshToken },
+    { timeout: API_TIMEOUT_MS },
+  );
   const { access_token, refresh_token } = response.data;
   await setTokens(access_token, refresh_token);
   return access_token;
