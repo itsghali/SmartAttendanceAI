@@ -1,5 +1,6 @@
 import base64
 import binascii
+import logging
 import sys
 import uuid
 from datetime import date, datetime
@@ -52,6 +53,8 @@ if str(_AI_DIR) not in sys.path:
     sys.path.insert(0, str(_AI_DIR))
 
 from fraud_detection.services.impossible_travel import impossible_travel_risk  # noqa: E402
+
+logger = logging.getLogger("app.attendance")
 
 
 class AttendanceService:
@@ -203,6 +206,7 @@ class AttendanceService:
         accuracy_meters: float | None,
         selfie_base64: str | None = None,
         is_mock_location: bool = False,
+        is_jailbroken: bool = False,
     ) -> Attendance:
         check_in_at = utcnow()
         today = check_in_at.date()
@@ -220,6 +224,14 @@ class AttendanceService:
         # that was going to be rejected anyway.
         await self._check_impossible_travel_or_raise(employee, position, check_in_at)
         await self._verify_face_or_raise(employee, selfie_base64)
+
+        if is_jailbroken:
+            # Weaker signal than is_mock_location (client-side JS heuristic,
+            # no OS-level guarantee) — flagged for HR review, not blocked.
+            logger.warning(
+                "check-in flagged: jailbreak indicators reported by client (employee=%s)",
+                employee.id,
+            )
 
         # No same-site restriction on purpose. Returning to the site just left —
         # after lunch, a supply run, moving a machine — is ordinary, and the
@@ -240,6 +252,7 @@ class AttendanceService:
                 longitude=longitude,
                 accuracy_meters=accuracy_meters,
                 geofence_id=matched.id,
+                is_jailbroken=is_jailbroken,
             )
         except IntegrityError as exc:
             raise AlreadyCheckedInError(

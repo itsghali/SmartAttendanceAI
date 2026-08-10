@@ -2,6 +2,7 @@ import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { AxiosError } from "axios";
 
 import * as attendanceService from "../services/attendanceService";
+import { checkIsJailbroken } from "../services/deviceIntegrityService";
 import { getCurrentPosition } from "../services/locationService";
 import { logout, sessionExpired } from "./authSlice";
 import type { Attendance, BreakPeriod } from "../services/attendanceService";
@@ -56,13 +57,17 @@ export const checkIn = createAsyncThunk(
   "attendance/checkIn",
   async (selfieBase64: string | undefined, { rejectWithValue }) => {
     try {
-      const position = await getCurrentPosition();
+      const [position, isJailbroken] = await Promise.all([
+        getCurrentPosition(),
+        checkIsJailbroken(),
+      ]);
       return await attendanceService.checkIn({
         latitude: position.latitude,
         longitude: position.longitude,
         accuracy_meters: position.accuracyMeters,
         selfie_base64: selfieBase64,
         is_mock_location: position.isMocked,
+        is_jailbroken: isJailbroken,
       });
     } catch (error) {
       return rejectWithValue(extractErrorMessage(error));

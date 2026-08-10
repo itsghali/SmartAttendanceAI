@@ -8,7 +8,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.smartattendanceai.mobile"
+      "bundleIdentifier": "com.smartattendanceai.mobile",
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": ["cydia", "sileo", "zbra", "filza"]
+      }
     },
     "android": {
       "package": "com.smartattendanceai.mobile",
