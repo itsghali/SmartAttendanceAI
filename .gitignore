@@ -1,0 +1,53 @@
+# env
+.env
+.env.local
+*.env
+!*.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# node
+node_modules/
+.next/
+out/
+dist/
+coverage/
+
+# expo / react native
+.expo/
+.expo-shared/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# ai model artifacts (large binaries, not source)
+ai/fraud_detection/models/*
+!ai/fraud_detection/models/.gitkeep
+ai/test_faces/demo_user.png
+
+# insightface model cache (fetched on first use, not source)
+.insightface/
+
+# smoke_test_face.py's runtime fixtures (cropped from insightface's bundled sample photo)
+backend/.smoke_face_fixtures/
+
+# os
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+
+# scratch markdown docs
+*.md
+*.claude
