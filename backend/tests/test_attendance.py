@@ -288,6 +288,46 @@ async def test_check_in_mock_location_rejected(client, db_session, caplog, uniqu
 
 
 @pytest.mark.asyncio
+async def test_check_in_jailbreak_flagged_not_blocked(client, db_session, caplog, unique_email):
+    """Unlike mock-location, a jailbreak signal is weaker (client-side JS
+    heuristic, no OS-level guarantee) — it flags the row for HR review, it
+    does not refuse the check-in."""
+    employee_access, _, _ = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+
+    resp = await client.post(
+        "/attendance/check-in",
+        json={
+            "latitude": OFFICE_LAT,
+            "longitude": OFFICE_LNG,
+            "accuracy_meters": 10,
+            "is_jailbroken": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["check_in_is_jailbroken"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_in_defaults_jailbreak_flag_false(client, db_session, caplog, unique_email):
+    employee_access, _, _ = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+
+    resp = await client.post(
+        "/attendance/check-in",
+        json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG, "accuracy_meters": 10},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["check_in_is_jailbroken"] is False
+
+
+@pytest.mark.asyncio
 async def test_check_in_impossible_travel_blocked(client, db_session, caplog, unique_email):
     """Check out at site A, backdate that check-out by 10 minutes (HR
     correction — real wall-clock elapsed time in a test run is milliseconds,

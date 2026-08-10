@@ -20,6 +20,11 @@ class CheckInRequest(BaseModel):
     # signal on its own, still enforced server-side so a modified UI alone
     # can't bypass it.
     is_mock_location: bool = Field(default=False)
+    # Self-reported by the client (deviceIntegrityService.ts's JS-level
+    # heuristic, iOS only) — only used on check-in. Weaker than
+    # is_mock_location, so this FLAGS the row for HR review rather than
+    # blocking it (see check_in_is_jailbroken on the Attendance model).
+    is_jailbroken: bool = Field(default=False)
 
 
 class CheckOutRequest(CheckInRequest):
@@ -97,6 +102,7 @@ class AttendanceOut(BaseModel):
     status: AttendanceStatus
     is_manual_entry: bool
     notes: str
+    check_in_is_jailbroken: bool
     breaks: list[BreakPeriodOut]
     geofence_events: list[GeofenceEventOut]
     # "not_monitored" | "on_break" | "live" | "stale" | None (session closed).

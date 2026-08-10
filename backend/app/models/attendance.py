@@ -61,6 +61,15 @@ class Attendance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     is_manual_entry: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notes: Mapped[str] = mapped_column(String(1000), default="")
 
+    # Best-effort, client-self-reported iOS jailbreak heuristic (see
+    # mobile/src/services/deviceIntegrityService.ts) — a weaker signal than
+    # Android's isFromMockProvider, so this FLAGS rather than blocks (unlike
+    # GPS-spoof detection, see PLAN.md T1). No dedicated HR-facing view
+    # consumes this yet — visible today only via the existing attendance
+    # detail/list endpoints, same "collected before consumed" gap this
+    # project has flagged repeatedly for geofence_events/face_verification_attempts.
+    check_in_is_jailbroken: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     # Continuous geofence monitoring state (mutable, DB-backed so it survives
     # across multi-worker deployments — see geofence_events for the immutable
     # ENTER/EXIT/RETURN audit log; these three columns are only the debounce

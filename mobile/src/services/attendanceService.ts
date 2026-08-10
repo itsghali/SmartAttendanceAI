@@ -72,6 +72,10 @@ interface CheckInPayload {
   // unused field on the other three actions, kept on the shared payload
   // shape rather than a second interface for one field.
   is_mock_location?: boolean;
+  // Only used by the backend on check-in — a JS-level heuristic (iOS only,
+  // see deviceIntegrityService.ts), weaker than is_mock_location, so it
+  // flags the row for HR review server-side rather than blocking.
+  is_jailbroken?: boolean;
 }
 
 interface LocationPingPayload {

@@ -2,6 +2,7 @@ import { configureStore } from "@reduxjs/toolkit";
 import { AxiosError } from "axios";
 
 import * as attendanceService from "../services/attendanceService";
+import * as deviceIntegrityService from "../services/deviceIntegrityService";
 import * as locationService from "../services/locationService";
 import attendanceReducer, {
   checkIn,
@@ -13,6 +14,7 @@ import attendanceReducer, {
 
 jest.mock("../services/attendanceService");
 jest.mock("../services/locationService");
+jest.mock("../services/deviceIntegrityService");
 
 function buildStore() {
   return configureStore({ reducer: { attendance: attendanceReducer } });
@@ -23,6 +25,7 @@ const POSITION = { latitude: 36.8065, longitude: 10.1815, accuracyMeters: 10, is
 describe("attendanceSlice", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (deviceIntegrityService.checkIsJailbroken as jest.Mock).mockResolvedValue(false);
   });
 
   it("fetchToday populates the open session and today's session list", async () => {
@@ -54,9 +57,27 @@ describe("attendanceSlice", () => {
       accuracy_meters: POSITION.accuracyMeters,
       selfie_base64: "base64-selfie-data",
       is_mock_location: false,
+      is_jailbroken: false,
     });
     expect(store.getState().attendance.today).toEqual(record);
     expect(store.getState().attendance.actionStatus).toBe("idle");
+  });
+
+  it("checkIn forwards isJailbroken=true so the backend can flag the row for HR review", async () => {
+    (locationService.getCurrentPosition as jest.Mock).mockResolvedValue(POSITION);
+    (deviceIntegrityService.checkIsJailbroken as jest.Mock).mockResolvedValue(true);
+    const record = { id: "a1", status: "present", breaks: [] } as any;
+    (attendanceService.checkIn as jest.Mock).mockResolvedValue(record);
+
+    const store = buildStore();
+    await store.dispatch(checkIn("base64-selfie-data"));
+
+    expect(attendanceService.checkIn).toHaveBeenCalledWith(
+      expect.objectContaining({ is_jailbroken: true }),
+    );
+    // Unlike a mocked location, a jailbreak signal flags rather than blocks —
+    // the check-in still succeeds.
+    expect(store.getState().attendance.today).toEqual(record);
   });
 
   it("checkIn forwards isMocked=true so the backend can refuse a spoofed GPS fix", async () => {

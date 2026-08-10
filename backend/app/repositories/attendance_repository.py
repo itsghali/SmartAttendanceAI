@@ -36,6 +36,7 @@ class AttendanceRepository:
         status: AttendanceStatus = AttendanceStatus.PRESENT,
         is_manual_entry: bool = False,
         notes: str = "",
+        is_jailbroken: bool = False,
     ) -> Attendance:
         attendance = Attendance(
             employee_id=employee_id,
@@ -48,6 +49,7 @@ class AttendanceRepository:
             status=status,
             is_manual_entry=is_manual_entry,
             notes=notes,
+            check_in_is_jailbroken=is_jailbroken,
         )
         self._session.add(attendance)
         await self._session.flush()

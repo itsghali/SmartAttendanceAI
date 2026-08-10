@@ -142,6 +142,7 @@ async def check_in(
             body.accuracy_meters,
             body.selfie_base64,
             body.is_mock_location,
+            body.is_jailbroken,
         )
     except _CONFLICT_ERRORS as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
