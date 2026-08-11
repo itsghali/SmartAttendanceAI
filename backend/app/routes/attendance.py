@@ -31,9 +31,15 @@ from app.core.exceptions import (
     PoorLocationAccuracyError,
 )
 from app.core.rate_limit import RateLimiter, get_redis_client
+from app.models.geofence import Geofence
+from app.models.geofence_event import GeofenceEventType
 from app.models.user import User
+from app.repositories.attendance_repository import AttendanceRepository
+from app.repositories.geofence_event_repository import GeofenceEventRepository
 from app.schemas.attendance import (
     AttendanceCorrection,
+    AttendanceExceptionOut,
+    AttendanceExceptionsListOut,
     AttendanceListOut,
     AttendanceOut,
     BreakEndRequest,
@@ -41,6 +47,8 @@ from app.schemas.attendance import (
     BreakStartRequest,
     CheckInRequest,
     CheckOutRequest,
+    GeofenceEventHistoryOut,
+    GeofenceEventSummaryOut,
     LocationPingRequest,
     LocationPingResponse,
     ManualEntryRequest,
@@ -336,6 +344,123 @@ async def list_all_attendance(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get(
+    "/exceptions",
+    response_model=AttendanceExceptionsListOut,
+    dependencies=[Depends(require_permission("geofence_events:read"))],
+)
+async def list_attendance_exceptions(
+    session: AsyncSession = Depends(get_db),
+) -> AttendanceExceptionsListOut:
+    # Registered before /{attendance_id} deliberately — FastAPI/Starlette
+    # matches routes in registration order, and a literal "/exceptions"
+    # segment would otherwise be swallowed by the {attendance_id} path param.
+    records = await AttendanceRepository(session).list_open()
+    items = []
+    needs_attention_count = 0
+    for record in records:
+        latest_event = record.geofence_events[-1] if record.geofence_events else None
+        needs_attention = latest_event is not None and latest_event.event_type == GeofenceEventType.EXIT
+        if needs_attention:
+            needs_attention_count += 1
+        items.append(
+            AttendanceExceptionOut(
+                employee_id=record.employee_id,
+                employee_full_name=record.employee.user.full_name,
+                employee_code=record.employee.employee_code,
+                attendance_id=record.id,
+                check_in_at=record.check_in_at,
+                monitoring_status=record.monitoring_status,
+                needs_attention=needs_attention,
+            )
+        )
+    return AttendanceExceptionsListOut(
+        items=items, needs_attention_count=needs_attention_count, total=len(items)
+    )
+
+
+def _geofence_label(geofence: Geofence | None, is_manual_entry: bool) -> str:
+    # A normal self-service check-in always requires an active geofence
+    # match (NoActiveGeofenceError otherwise) — same for the geofence_events
+    # that fire during monitoring (MonitoringService never creates one with
+    # a null geofence_id). So for those, a null geofence now unambiguously
+    # means it existed and was later deleted. Manual/backfilled entries are
+    # the one path that can start with no geofence at all — that's
+    # "not monitored" from the beginning, not a deletion.
+    if geofence is not None:
+        return geofence.name
+    return "Not monitored" if is_manual_entry else "Deleted geofence"
+
+
+@router.get(
+    "/{employee_id}/history",
+    response_model=GeofenceEventHistoryOut,
+    dependencies=[Depends(require_permission("geofence_events:read"))],
+)
+async def get_employee_geofence_history(
+    employee_id: uuid.UUID,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    event_type: GeofenceEventType | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> GeofenceEventHistoryOut:
+    events = await GeofenceEventRepository(session).list_all_for_employee(
+        employee_id, date_from, date_to, event_type
+    )
+    entries = [
+        GeofenceEventSummaryOut(
+            id=str(event.id),
+            event_type=event.event_type.value,
+            geofence_name=_geofence_label(event.geofence, is_manual_entry=False),
+            created_at=event.created_at,
+        )
+        for event in events
+    ]
+
+    # Merge in check-in/check-out — not a geofence_events row, but the same
+    # timeline HR reads to resolve a payroll dispute. Only merged when the
+    # event_type filter isn't narrowing to a real geofence-event type, since
+    # check_in/check_out aren't ENTER/EXIT/RETURN and a filtered request is
+    # explicitly asking for geofence events only.
+    if event_type is None:
+        sessions = await AttendanceRepository(session).list_all_for_employee(
+            employee_id, date_from, date_to
+        )
+        for attendance in sessions:
+            entries.append(
+                GeofenceEventSummaryOut(
+                    id=f"{attendance.id}-checkin",
+                    event_type="check_in",
+                    geofence_name=_geofence_label(
+                        attendance.check_in_geofence, attendance.is_manual_entry
+                    ),
+                    created_at=attendance.check_in_at,
+                )
+            )
+            if attendance.check_out_at is not None:
+                entries.append(
+                    GeofenceEventSummaryOut(
+                        id=f"{attendance.id}-checkout",
+                        event_type="check_out",
+                        geofence_name=_geofence_label(
+                            attendance.check_out_geofence, attendance.is_manual_entry
+                        ),
+                        created_at=attendance.check_out_at,
+                    )
+                )
+
+    # Merged across two tables, so pagination happens here rather than in
+    # SQL — a single LIMIT/OFFSET can't paginate correctly across both.
+    # Bounded by realistic per-employee volume, same reasoning as the two
+    # repository methods this merges (list_open, list_all_for_employee).
+    entries.sort(key=lambda e: e.created_at, reverse=True)
+    total = len(entries)
+    page = entries[offset : offset + limit]
+    return GeofenceEventHistoryOut(items=page, total=total, limit=limit, offset=offset)
 
 
 @router.get(

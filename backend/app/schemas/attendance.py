@@ -137,6 +137,71 @@ class AttendanceListOut(BaseModel):
     offset: int
 
 
+class GeofenceEventSummaryOut(BaseModel):
+    """Event-summary only — deliberately has no latitude/longitude fields.
+
+    Codex outside-voice finding (2026-08-11, geofence-alerts eng review):
+    AttendanceOut and GeofenceEventOut both still ship raw coordinates,
+    which makes "event-summary only, no coordinates" (design doc premise #4)
+    a frontend convention rather than a guarantee. This schema is the actual
+    enforcement point — it has nothing to leak because the fields don't
+    exist here, not because a caller remembers to hide them.
+    """
+
+    # str, not uuid.UUID: a check-in and its check-out share one Attendance
+    # id, so the route synthesizes distinct string ids for those two merged
+    # timeline entries ("{attendance_id}-checkin" / "-checkout") — a real
+    # GeofenceEvent id stringifies fine into the same field.
+    id: str
+    # "enter" | "exit" | "return" (GeofenceEventType) | "check_in" | "check_out"
+    # — widened from GeofenceEventType to str so the same row shape covers
+    # the merged check-in/check-out timeline entries the route adds
+    # alongside real geofence events (see get_employee_geofence_history).
+    event_type: str
+    # "Deleted geofence" when the source geofence was removed after the
+    # event fired (geofence_id nulls out via ON DELETE SET NULL); "Not
+    # monitored" when there was never a geofence to begin with — never
+    # blank, per design doc success criteria.
+    geofence_name: str
+    created_at: datetime
+
+
+class GeofenceEventHistoryOut(BaseModel):
+    items: list[GeofenceEventSummaryOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class AttendanceExceptionOut(BaseModel):
+    """One row on the "Site status — today" exceptions screen.
+
+    No lat/lng, same rationale as GeofenceEventSummaryOut. Carries employee
+    identity explicitly (Codex outside-voice finding: employee_id alone is
+    unusable — HR has no way to know who a raw UUID refers to).
+    """
+
+    employee_id: uuid.UUID
+    employee_full_name: str
+    employee_code: str
+    attendance_id: uuid.UUID
+    check_in_at: datetime
+    # "not_monitored" | "on_break" | "live" | "stale" — see
+    # Attendance.monitoring_status. None only if check_out_at is set, which
+    # should not happen for rows on this screen (exceptions query is
+    # open-attendance-only), but the type follows the source property.
+    monitoring_status: str | None
+    # True when this attendance's latest geofence_events row is an EXIT
+    # that hasn't been followed by a RETURN — the "needs attention" signal.
+    needs_attention: bool
+
+
+class AttendanceExceptionsListOut(BaseModel):
+    items: list[AttendanceExceptionOut]
+    needs_attention_count: int
+    total: int
+
+
 class ManualEntryRequest(BaseModel):
     attendance_date: date
     check_in_at: datetime

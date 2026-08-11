@@ -1,6 +1,7 @@
 import uuid
+from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,14 @@ from app.core.exceptions import (
 )
 from app.core.rate_limit import RateLimiter, get_redis_client
 from app.models.user import User
-from app.schemas.face import FaceEnrollOut, FaceStatusOut, FaceVerifyOut
+from app.repositories.face_repository import FaceRepository
+from app.schemas.face import (
+    FaceEnrollOut,
+    FaceStatusOut,
+    FaceVerificationAttemptListOut,
+    FaceVerificationAttemptOut,
+    FaceVerifyOut,
+)
 from app.services.employee_service import EmployeeService
 from app.services.face_service import FaceService
 
@@ -156,3 +164,38 @@ async def status_for_employee(
 ) -> FaceStatusOut:
     status_dict = await FaceService(session).get_status(employee_id)
     return FaceStatusOut(**status_dict)
+
+
+@router.get(
+    "/attempts/{employee_id}",
+    response_model=FaceVerificationAttemptListOut,
+    # Same permission as the geofence-event history view, not users:read —
+    # this is the same HR audit-trail feature (2026-08-11 build) and must
+    # exclude Supervisor the same way, which users:read does not.
+    dependencies=[Depends(require_permission("geofence_events:read"))],
+)
+async def list_face_attempts(
+    employee_id: uuid.UUID,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> FaceVerificationAttemptListOut:
+    attempts, total = await FaceRepository(session).list_attempts_for_employee(
+        employee_id, date_from, date_to, limit, offset
+    )
+    return FaceVerificationAttemptListOut(
+        items=[
+            FaceVerificationAttemptOut(
+                id=attempt.id,
+                passed=attempt.passed,
+                failure_reason=attempt.failure_reason.value if attempt.failure_reason else None,
+                created_at=attempt.created_at,
+            )
+            for attempt in attempts
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )

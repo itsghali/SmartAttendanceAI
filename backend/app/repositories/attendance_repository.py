@@ -174,6 +174,44 @@ class AttendanceRepository:
         attendance.check_out_geofence_id = geofence_id
         await self._session.flush()
 
+    async def list_all_for_employee(
+        self, employee_id: uuid.UUID, date_from: date | None, date_to: date | None
+    ) -> list[Attendance]:
+        """Every attendance session for one employee in range — unpaginated,
+        same "bounded by realistic per-employee volume, not worth a second
+        pagination axis" reasoning as list_open(). Feeds the History timeline's
+        check-in/check-out entries (merged app-level with geofence_events in
+        the route, then paginated together — see get_employee_geofence_history)."""
+        stmt = select(Attendance).options(*_EAGER).where(Attendance.employee_id == employee_id)
+        if date_from is not None:
+            stmt = stmt.where(Attendance.attendance_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Attendance.attendance_date <= date_to)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_open(self) -> list[Attendance]:
+        """Every currently-open attendance session, company-wide — the roster
+        behind the "Site status — today" exceptions screen. Deliberately not
+        paginated: TODOS.md's own design calls this a "collapsed roster", not
+        a paged list, and it's bounded by concurrently-working headcount, not
+        historical volume, unlike list_paginated's callers. Also eager-loads
+        employee.user (list_paginated's callers never need the employee's
+        name, so that chain isn't in the shared _EAGER tuple) — the
+        exceptions screen must show a name, not just employee_id (Codex
+        outside-voice finding, eng review 2026-08-11), and skipping this
+        eager-load would hit the same async lazy-load failure GeofenceEvent
+        .geofence had.
+        """
+        stmt = (
+            select(Attendance)
+            .options(*_EAGER, selectinload(Attendance.employee).selectinload(Employee.user))
+            .where(Attendance.check_out_at.is_(None))
+            .order_by(Attendance.check_in_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_paginated(
         self,
         employee_id: uuid.UUID | None,

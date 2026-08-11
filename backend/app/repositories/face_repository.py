@@ -1,6 +1,7 @@
 import uuid
+from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.face_profile import FaceProfile
@@ -56,3 +57,39 @@ class FaceRepository:
         self._session.add(attempt)
         await self._session.flush()
         return attempt
+
+    async def list_attempts_for_employee(
+        self,
+        employee_id: uuid.UUID,
+        date_from: date | None,
+        date_to: date | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[FaceVerificationAttempt], int]:
+        """Same event-grain reasoning as GeofenceEventRepository.list_for_employee
+        — this is its own query, not a reuse of a session/attendance-grained
+        method, and it never selects similarity_score/liveness_score into the
+        response layer (see the model's own docstring: those scores are not
+        for client consumption, HR included)."""
+        stmt = select(FaceVerificationAttempt).where(
+            FaceVerificationAttempt.employee_id == employee_id
+        )
+        count_stmt = (
+            select(func.count())
+            .select_from(FaceVerificationAttempt)
+            .where(FaceVerificationAttempt.employee_id == employee_id)
+        )
+
+        if date_from is not None:
+            start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+            stmt = stmt.where(FaceVerificationAttempt.created_at >= start)
+            count_stmt = count_stmt.where(FaceVerificationAttempt.created_at >= start)
+        if date_to is not None:
+            end = datetime.combine(date_to, time.min, tzinfo=timezone.utc) + timedelta(days=1)
+            stmt = stmt.where(FaceVerificationAttempt.created_at < end)
+            count_stmt = count_stmt.where(FaceVerificationAttempt.created_at < end)
+
+        total = (await self._session.execute(count_stmt)).scalar_one()
+        stmt = stmt.order_by(FaceVerificationAttempt.created_at.desc()).limit(limit).offset(offset)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all()), total

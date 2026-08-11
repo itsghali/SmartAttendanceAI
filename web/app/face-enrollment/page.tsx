@@ -133,6 +133,9 @@ function FaceEnrollmentPageContent() {
           <Link href="/geofences" className="text-sm text-blue-600 underline">
             Geofences
           </Link>
+          <Link href="/site-status" className="text-sm text-blue-600 underline">
+            Site Status
+          </Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
           <span>{user?.full_name} ({user?.role})</span>

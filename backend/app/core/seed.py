@@ -27,6 +27,13 @@ PERMISSIONS = {
     "audit_logs:read": "View audit logs",
     "geofences:read": "View geofence zones",
     "geofences:write": "Create/update geofence zones",
+    # Deliberately separate from attendance:read:all, which supervisor also
+    # holds — this permission gates the geofence-exit exceptions/history
+    # screens, and supervisor is explicitly excluded from those (see the
+    # "Geofence-Exit Alerts + Structured Attendance History" design doc).
+    "geofence_events:read": (
+        "View geofence-exit alerts, per-employee attendance history, and face-verification attempts"
+    ),
     "attendance:record:own": "Check in/out and start/end break for yourself",
     "attendance:read:own": "View your own attendance history",
     "attendance:read:all": "View any employee's attendance records",
@@ -44,6 +51,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "audit_logs:read",
         "geofences:read",
         "geofences:write",
+        "geofence_events:read",
         "attendance:read:all",
         "attendance:correct",
     ],
@@ -54,6 +62,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "audit_logs:read",
         "geofences:read",
         "geofences:write",
+        "geofence_events:read",
         "attendance:read:all",
         "attendance:correct",
     ],
