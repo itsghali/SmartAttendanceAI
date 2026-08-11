@@ -13,9 +13,16 @@ export function setSessionExpiredHandler(handler: () => void): void {
  * Without this, an unreachable backend (wrong LAN IP, dead tunnel, phone on
  * the wrong Wi-Fi) hangs on the OS's own connect timeout — 60s+ on mobile —
  * with the button just spinning and no error surfaced for the whole wait.
- * Same order of magnitude as locationService.ts's POSITION_TIMEOUT_MS.
+ *
+ * 30s, not 15s: face-verification-gated requests (check-in/out, break
+ * start/end) run a real ONNX detect+embed pass server-side on top of the
+ * network round trip and a base64 selfie upload — 15s was tight enough to
+ * false-positive-timeout a legitimate slow-but-working response (see
+ * AI-CHANGELOG.md). The backend now warms the model at startup so this
+ * shouldn't routinely run long, but 30s leaves real headroom for a slow
+ * connection rather than trading one failure mode for another.
  */
-const API_TIMEOUT_MS = 15_000;
+const API_TIMEOUT_MS = 30_000;
 
 export const api = axios.create({
   baseURL: getApiBaseUrl(),

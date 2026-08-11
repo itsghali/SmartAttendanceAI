@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -44,7 +46,23 @@ if settings.environment == "production" and (
         "Fernet key (Fernet.generate_key())."
     )
 
-app = FastAPI(title=settings.app_name, debug=settings.debug)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.face_verification_enabled:
+        # Loads the ONNX detection/recognition/landmark models from disk —
+        # several seconds, CPU-bound. Without this, that cost lands on
+        # whichever real user's request happens to be first after every
+        # deploy/restart, and can exceed the mobile client's request
+        # timeout (see AI-CHANGELOG.md — this exact symptom, hit live).
+        # Already-loaded models (warm restarts within the same container
+        # lifetime) make this a no-op; `_get_app()` caches the loaded model.
+        from face_recognition import pipeline as face_pipeline
+
+        face_pipeline.warm_up()
+    yield
+
+
+app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
