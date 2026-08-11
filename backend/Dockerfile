@@ -20,9 +20,20 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY ai/face_recognition/ ai/face_recognition/
 COPY ai/fraud_detection/ ai/fraud_detection/
+# alembic.ini + migrations live outside backend/ but ship in the same image so
+# a platform preDeployCommand can run `alembic upgrade head` against them.
+COPY database/ database/
+
+# Bake insightface's buffalo_l weights into the image (downloads to
+# ~/.insightface/models, same path pipeline.py's warm_up() checks at
+# runtime) instead of fetching ~288MB from GitHub on every cold container
+# start. Trades build-time network dependency for consistent, fast deploys.
+RUN python -c "import sys; sys.path.insert(0, '/app/ai'); from face_recognition.pipeline import warm_up; warm_up()"
 
 WORKDIR /app/backend
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form (not exec/JSON-array form) so $PORT actually expands — Railway
+# injects PORT at runtime; exec form would pass the literal string "$PORT".
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

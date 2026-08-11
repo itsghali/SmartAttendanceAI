@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -10,6 +11,18 @@ config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# alembic.ini's sqlalchemy.url is a local-dev default. In production (Railway),
+# DATABASE_URL is injected via env var and must win — alembic needs the sync
+# psycopg2 driver regardless of which scheme the platform hands us.
+_env_db_url = os.environ.get("DATABASE_URL")
+if _env_db_url:
+    _env_db_url = _env_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+    if _env_db_url.startswith("postgres://"):
+        _env_db_url = _env_db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif _env_db_url.startswith("postgresql://"):
+        _env_db_url = _env_db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    config.set_main_option("sqlalchemy.url", _env_db_url)
 
 target_metadata = Base.metadata
 

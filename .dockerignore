@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/__pycache__
+**/*.pyc
+backend/.venv
+.venv
+ai/**/models
+**/*.md
+**/.env
+**/.env.*
