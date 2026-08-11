@@ -34,6 +34,10 @@ WORKDIR /app/backend
 
 EXPOSE 8000
 
-# Shell form (not exec/JSON-array form) so $PORT actually expands — Railway
-# injects PORT at runtime; exec form would pass the literal string "$PORT".
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Migration runs as part of container startup, not Railway's separate
+# preDeployCommand — that mechanism gave zero log visibility on failure
+# (confirmed: railway.json's preDeployCommand failed with no captured
+# stdout/stderr in either the dashboard or CLI). Folding it into CMD means
+# a migration failure shows up in ordinary deploy logs, which are captured.
+# Shell form (not exec/JSON-array) so $PORT actually expands.
+CMD cd /app/database && alembic upgrade head && cd /app/backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
