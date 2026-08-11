@@ -10,6 +10,13 @@ export interface AttendanceException {
   check_in_at: string;
   monitoring_status: MonitoringStatus;
   needs_attention: boolean;
+  // Path B addition (autoplan geofence-monitoring UI/UX review, 2026-08-11):
+  // reuses the same geofence_events eager-load needs_attention already reads
+  // from — no new backend query. null when there's no geofence event yet
+  // (e.g. a manual-entry check-in with no geofence assigned at all).
+  last_event_type: TimelineEntryType | null;
+  last_event_at: string | null;
+  geofence_name: string | null;
 }
 
 export interface AttendanceExceptionsList {
@@ -38,6 +45,10 @@ export interface GeofenceEventSummary {
   // the backend always fills this in.
   geofence_name: string;
   created_at: string;
+  // Path B addition — null when there's no source geofence to read a
+  // radius from (deleted / not-monitored), same nullability as geofence_name's
+  // fallback labels imply.
+  authorized_radius_meters: number | null;
 }
 
 export interface GeofenceEventHistory {

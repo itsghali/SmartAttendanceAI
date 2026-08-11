@@ -164,6 +164,11 @@ class GeofenceEventSummaryOut(BaseModel):
     # blank, per design doc success criteria.
     geofence_name: str
     created_at: datetime
+    # Added for the Event Details drawer (autoplan geofence-monitoring
+    # UI/UX review, 2026-08-11) — null when there's no source geofence to
+    # read a radius from (deleted/not-monitored), same nullability pattern
+    # as geofence_name's fallback labels.
+    authorized_radius_meters: float | None = None
 
 
 class GeofenceEventHistoryOut(BaseModel):
@@ -194,6 +199,18 @@ class AttendanceExceptionOut(BaseModel):
     # True when this attendance's latest geofence_events row is an EXIT
     # that hasn't been followed by a RETURN — the "needs attention" signal.
     needs_attention: bool
+    # Added for the alert table's Event/Geofence/Detected At columns
+    # (autoplan geofence-monitoring UI/UX review, 2026-08-11, Path B).
+    # last_event_type/at come from the same geofence_events eager-load
+    # already used to compute needs_attention above — no new query.
+    # "enter" | "exit" | "return" | None (no geofence event yet, e.g. a
+    # manual-entry check-in with no geofence assigned at all).
+    last_event_type: str | None = None
+    last_event_at: datetime | None = None
+    # Current check-in geofence's name — "Deleted geofence" / "Not
+    # monitored" fallback, same _geofence_label() convention used in the
+    # history endpoint. Never blank.
+    geofence_name: str | None = None
 
 
 class AttendanceExceptionsListOut(BaseModel):

@@ -346,6 +346,19 @@ async def list_all_attendance(
     )
 
 
+def _geofence_label(geofence: Geofence | None, is_manual_entry: bool) -> str:
+    # A normal self-service check-in always requires an active geofence
+    # match (NoActiveGeofenceError otherwise) — same for the geofence_events
+    # that fire during monitoring (MonitoringService never creates one with
+    # a null geofence_id). So for those, a null geofence now unambiguously
+    # means it existed and was later deleted. Manual/backfilled entries are
+    # the one path that can start with no geofence at all — that's
+    # "not monitored" from the beginning, not a deletion.
+    if geofence is not None:
+        return geofence.name
+    return "Not monitored" if is_manual_entry else "Deleted geofence"
+
+
 @router.get(
     "/exceptions",
     response_model=AttendanceExceptionsListOut,
@@ -374,24 +387,14 @@ async def list_attendance_exceptions(
                 check_in_at=record.check_in_at,
                 monitoring_status=record.monitoring_status,
                 needs_attention=needs_attention,
+                last_event_type=latest_event.event_type.value if latest_event else None,
+                last_event_at=latest_event.created_at if latest_event else None,
+                geofence_name=_geofence_label(record.check_in_geofence, record.is_manual_entry),
             )
         )
     return AttendanceExceptionsListOut(
         items=items, needs_attention_count=needs_attention_count, total=len(items)
     )
-
-
-def _geofence_label(geofence: Geofence | None, is_manual_entry: bool) -> str:
-    # A normal self-service check-in always requires an active geofence
-    # match (NoActiveGeofenceError otherwise) — same for the geofence_events
-    # that fire during monitoring (MonitoringService never creates one with
-    # a null geofence_id). So for those, a null geofence now unambiguously
-    # means it existed and was later deleted. Manual/backfilled entries are
-    # the one path that can start with no geofence at all — that's
-    # "not monitored" from the beginning, not a deletion.
-    if geofence is not None:
-        return geofence.name
-    return "Not monitored" if is_manual_entry else "Deleted geofence"
 
 
 @router.get(
@@ -417,6 +420,7 @@ async def get_employee_geofence_history(
             event_type=event.event_type.value,
             geofence_name=_geofence_label(event.geofence, is_manual_entry=False),
             created_at=event.created_at,
+            authorized_radius_meters=event.geofence.radius_meters if event.geofence else None,
         )
         for event in events
     ]
@@ -439,6 +443,11 @@ async def get_employee_geofence_history(
                         attendance.check_in_geofence, attendance.is_manual_entry
                     ),
                     created_at=attendance.check_in_at,
+                    authorized_radius_meters=(
+                        attendance.check_in_geofence.radius_meters
+                        if attendance.check_in_geofence
+                        else None
+                    ),
                 )
             )
             if attendance.check_out_at is not None:
@@ -450,6 +459,11 @@ async def get_employee_geofence_history(
                             attendance.check_out_geofence, attendance.is_manual_entry
                         ),
                         created_at=attendance.check_out_at,
+                        authorized_radius_meters=(
+                            attendance.check_out_geofence.radius_meters
+                            if attendance.check_out_geofence
+                            else None
+                        ),
                     )
                 )
 
