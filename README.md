@@ -60,6 +60,41 @@ Every account below was verified working (`HTTP 200` on `/auth/login`) at the ti
 | `auditor@example.com` | `Audit12345` | auditor | Read-only |
 | `test1@example.com` | `Test12345` | employee | Clean — not checked in |
 
+### Permissions by role
+
+| Permission | super_admin | admin | hr_manager | supervisor | employee | auditor |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **User Management** |
+| users:read | ✓ | ✓ | ✓ | ✓ | – | ✓ |
+| users:write | ✓ | ✓ | ✓ | – | – | – |
+| users:delete | ✓ | ✓ | ✓ | – | – | – |
+| **Device Management** |
+| devices:read:own | ✓ | – | – | – | ✓ | – |
+| devices:manage:own | ✓ | – | – | – | ✓ | – |
+| devices:manage:all | ✓ | ✓ | – | – | – | – |
+| **Session Management** |
+| sessions:read:own | ✓ | – | – | – | ✓ | – |
+| sessions:manage:own | ✓ | – | – | – | ✓ | – |
+| sessions:manage:all | ✓ | ✓ | – | – | – | – |
+| **Geofencing** |
+| geofences:read | ✓ | ✓ | ✓ | – | – | ✓ |
+| geofences:write | ✓ | ✓ | ✓ | – | – | – |
+| geofence_events:read | ✓ | ✓ | ✓ | – | – | – |
+| **Attendance** |
+| attendance:record:own | ✓ | – | – | – | ✓ | – |
+| attendance:read:own | ✓ | – | – | – | ✓ | – |
+| attendance:read:all | ✓ | ✓ | ✓ | ✓* | – | ✓ |
+| attendance:correct | ✓ | ✓ | ✓ | ✓ | – | – |
+| **Audit & Compliance** |
+| audit_logs:read | ✓ | ✓ | ✓ | – | – | ✓ |
+
+**Notes:**
+- `super_admin` has every permission (full superset).
+- `hr_manager` identical to `admin` except missing `devices:manage:all` and `sessions:manage:all` (no device/session admin powers).
+- `supervisor` has `attendance:read:all` scoped to department only (enforced at route level, not role-wide).
+- `supervisor` deliberately excluded from `geofence_events:read` — kept off geofence-exit/exceptions/history screens by design.
+- `auditor` is read-only; `audit_logs:read` is present but has no backend feature (no logs table/endpoint exists).
+
 **Employees in a specific attendance state** — no setup needed, they are already in it:
 
 | Email | Password | State |

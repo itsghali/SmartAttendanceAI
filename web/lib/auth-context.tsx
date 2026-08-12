@@ -9,7 +9,7 @@ import { setSessionExpiredHandler } from "./api";
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
 }
 
@@ -36,9 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, [clearSession]);
 
-  async function login(email: string, password: string): Promise<void> {
+  async function login(email: string, password: string): Promise<User> {
     const loggedInUser = await loginRequest(email, password);
     setUser(loggedInUser);
+    return loggedInUser;
   }
 
   async function logout(): Promise<void> {

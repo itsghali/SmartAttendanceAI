@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AxiosError } from "axios";
 
 import { useAuth } from "../../lib/auth-context";
+import { roleLandingPath } from "../../lib/roleRouting";
 
 function LoginForm() {
   const { user, loading, login } = useAuth();
@@ -20,7 +21,7 @@ function LoginForm() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/geofences");
+      router.replace(roleLandingPath(user.role));
     }
   }, [loading, user, router]);
 
@@ -29,8 +30,8 @@ function LoginForm() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      router.replace("/geofences");
+      const loggedInUser = await login(email, password);
+      router.replace(roleLandingPath(loggedInUser.role));
     } catch (err) {
       const detail =
         err instanceof AxiosError

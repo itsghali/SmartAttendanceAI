@@ -333,6 +333,11 @@ async def list_all_attendance(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="supervisors may only view their own department",
             )
+        if own_employee.department_id is None:
+            # A department_id of None means "no filter" to AttendanceService
+            # .list_all — for a supervisor with no department assigned, that
+            # would return every department's attendance instead of nothing.
+            return AttendanceListOut(items=[], total=0, limit=limit, offset=offset)
         department_id = own_employee.department_id
 
     records, total = await AttendanceService(session).list_all(
@@ -507,11 +512,27 @@ async def get_attendance(
     "/{employee_id}/manual-entry",
     response_model=AttendanceOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_permission("attendance:correct"))],
 )
 async def create_manual_entry(
-    employee_id: uuid.UUID, body: ManualEntryRequest, session: AsyncSession = Depends(get_db)
+    employee_id: uuid.UUID,
+    body: ManualEntryRequest,
+    user: User = Depends(require_permission("attendance:correct")),
+    session: AsyncSession = Depends(get_db),
 ) -> AttendanceOut:
+    if user.role.name == "supervisor":
+        target_employee = await EmployeeService(session).get(employee_id)
+        own_employee = await _resolve_employee(user, session)
+        # 404, not 403 — same reasoning as get_attendance: a supervisor
+        # probing another department's employee IDs must not be able to
+        # distinguish "not yours" from "doesn't exist".
+        if (
+            target_employee is None
+            or own_employee.department_id is None
+            or target_employee.department_id != own_employee.department_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="employee not found"
+            )
     try:
         attendance = await AttendanceService(session).create_manual_entry(
             employee_id, body.attendance_date, body.check_in_at, body.check_out_at, body.status, body.notes
@@ -526,15 +547,27 @@ async def create_manual_entry(
 @router.patch(
     "/{attendance_id}",
     response_model=AttendanceOut,
-    dependencies=[Depends(require_permission("attendance:correct"))],
 )
 async def correct_attendance(
-    attendance_id: uuid.UUID, body: AttendanceCorrection, session: AsyncSession = Depends(get_db)
+    attendance_id: uuid.UUID,
+    body: AttendanceCorrection,
+    user: User = Depends(require_permission("attendance:correct")),
+    session: AsyncSession = Depends(get_db),
 ) -> AttendanceOut:
     service = AttendanceService(session)
     attendance = await service.get(attendance_id)
     if attendance is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="attendance record not found")
+    if user.role.name == "supervisor":
+        own_employee = await _resolve_employee(user, session)
+        # 404, not 403 — same reasoning as get_attendance.
+        if (
+            own_employee.department_id is None
+            or attendance.employee.department_id != own_employee.department_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="attendance record not found"
+            )
 
     fields = body.model_dump(exclude_unset=True)
     await service.apply_correction(

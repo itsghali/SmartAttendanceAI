@@ -86,11 +86,33 @@ async def list_employees(
     department_id: uuid.UUID | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    user: User = Depends(require_permission("users:read")),
     session: AsyncSession = Depends(get_db),
 ) -> EmployeeListOut:
-    employees, total = await EmployeeService(session).list_paginated(
-        department_id, limit, offset
-    )
+    # Same department-scoping rule as attendance.list_all_attendance: a
+    # supervisor is confined to their own department, everyone above that
+    # sees the whole company. A requested department_id outside a
+    # supervisor's own is rejected rather than silently overridden.
+    service = EmployeeService(session)
+    if user.role.name == "supervisor":
+        own_employee = await service.get_or_create_own_profile(user)
+        if own_employee is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="no employee profile for this account"
+            )
+        if department_id is not None and department_id != own_employee.department_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="supervisors may only view their own department",
+            )
+        if own_employee.department_id is None:
+            # A department_id of None means "no filter" to list_paginated —
+            # for a supervisor with no department assigned, that would
+            # return the whole company instead of nothing. Short-circuit.
+            return EmployeeListOut(items=[], total=0, limit=limit, offset=offset)
+        department_id = own_employee.department_id
+
+    employees, total = await service.list_paginated(department_id, limit, offset)
     return EmployeeListOut(
         items=[_employee_out(e) for e in employees], total=total, limit=limit, offset=offset
     )
@@ -111,14 +133,27 @@ async def get_my_employee_profile(
 @router.get(
     "/{employee_id}",
     response_model=EmployeeOut,
-    dependencies=[Depends(require_permission("users:read"))],
 )
 async def get_employee(
-    employee_id: uuid.UUID, session: AsyncSession = Depends(get_db)
+    employee_id: uuid.UUID,
+    user: User = Depends(require_permission("users:read")),
+    session: AsyncSession = Depends(get_db),
 ) -> EmployeeOut:
-    employee = await EmployeeService(session).get(employee_id)
+    service = EmployeeService(session)
+    employee = await service.get(employee_id)
     if employee is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="employee not found")
+    if user.role.name == "supervisor":
+        own_employee = await service.get_or_create_own_profile(user)
+        # 404, not 403 — same reasoning as attendance.get_attendance: a
+        # supervisor probing another department's employee IDs must not be
+        # able to distinguish "not yours" from "doesn't exist".
+        if (
+            own_employee is None
+            or own_employee.department_id is None
+            or employee.department_id != own_employee.department_id
+        ):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="employee not found")
     return _employee_out(employee)
 
 
