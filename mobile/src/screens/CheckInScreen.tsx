@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import { LocationConsentModal } from "../components/LocationConsentModal";
 import { SelfieCapture } from "../components/SelfieCapture";
@@ -16,30 +17,9 @@ import { GeofenceMonitor } from "../services/geofenceMonitor";
 import { logout } from "../store/authSlice";
 import { checkIn, checkOut, endBreak, fetchToday, startBreak } from "../store/attendanceSlice";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
+import { formatDuration, formatTime } from "../utils/attendanceFormat";
 
-function formatTime(isoString: string | null): string {
-  if (!isoString) {
-    return "--:--";
-  }
-  return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-/** Elapsed time between two timestamps, for showing how long a break ran. */
-function formatDuration(startIso: string, endIso: string | null): string {
-  if (!endIso) {
-    return "";
-  }
-  const minutes = Math.round(
-    (new Date(endIso).getTime() - new Date(startIso).getTime()) / 60_000,
-  );
-  if (minutes < 60) {
-    return `${minutes} min`;
-  }
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${String(minutes % 60).padStart(2, "0")}`;
-}
-
-export function CheckInScreen() {
+export function CheckInScreen({ navigation }: NativeStackScreenProps<any>) {
   const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
@@ -134,14 +114,24 @@ export function CheckInScreen() {
     >
       <View style={styles.header}>
         <Text style={styles.greeting}>Hi, {user?.full_name ?? "there"}</Text>
-        <TouchableOpacity
-          testID="logout-button"
-          accessibilityRole="button"
-          accessibilityLabel="Log out"
-          onPress={() => dispatch(logout())}
-        >
-          <Text style={styles.logout}>Log out</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            testID="history-button"
+            accessibilityRole="button"
+            accessibilityLabel="View attendance history"
+            onPress={() => navigation.navigate("History")}
+          >
+            <Text style={styles.logout}>History</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            testID="logout-button"
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            onPress={() => dispatch(logout())}
+          >
+            <Text style={styles.logout}>Log out</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {showExitBanner && (
@@ -347,6 +337,10 @@ const styles = StyleSheet.create({
   greeting: {
     fontSize: 20,
     fontWeight: "700",
+  },
+  headerActions: {
+    flexDirection: "row",
+    gap: 16,
   },
   logout: {
     color: "#2563eb",

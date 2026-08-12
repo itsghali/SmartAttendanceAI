@@ -116,6 +116,34 @@ export async function getTodayAttendance(): Promise<TodayAttendance> {
   return response.data;
 }
 
+export interface AttendanceList {
+  items: Attendance[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AttendanceHistoryParams {
+  limit?: number;
+  offset?: number;
+}
+
+const HISTORY_PAGE_SIZE = 20;
+
+// GET /attendance/me — full history, unlike getTodayAttendance's /me/today.
+// Already existed server-side; nothing on mobile called it before this.
+export async function listMyAttendance(
+  params: AttendanceHistoryParams = {},
+): Promise<AttendanceList> {
+  const response = await api.get<AttendanceList>("/attendance/me", {
+    params: {
+      limit: params.limit ?? HISTORY_PAGE_SIZE,
+      offset: params.offset ?? 0,
+    },
+  });
+  return response.data;
+}
+
 export async function sendLocationPing(payload: LocationPingPayload): Promise<LocationPingResult> {
   const response = await api.post<LocationPingResult>("/attendance/location-ping", payload);
   return response.data;

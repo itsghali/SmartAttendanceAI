@@ -46,6 +46,16 @@ if settings.environment == "production" and (
         "Fernet key (Fernet.generate_key())."
     )
 
+# DEBUG=true widens FastAPI's default exception handler to return full
+# tracebacks in the response body — fine for local dev, an information
+# leak in production. Same fail-loudly treatment as the JWT/Fernet guards
+# above rather than trusting every deploy's env vars to be set right.
+if settings.environment == "production" and settings.debug:
+    raise RuntimeError(
+        "DEBUG=true is set for a production deploy — this leaks stack traces "
+        "in error responses. Set DEBUG=false (or unset it)."
+    )
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.face_verification_enabled:

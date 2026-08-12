@@ -9,6 +9,7 @@ already runs.
 
 from __future__ import annotations
 
+import logging
 import sys
 import uuid
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ from face_recognition.exceptions import (  # noqa: E402
     PipelineMultiFaceError,
     PipelineNoFaceError,
 )
+
+logger = logging.getLogger("app.face")
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -164,7 +167,9 @@ class FaceService:
 
         # Liveness gates before similarity — a spoof that also happens to
         # match shouldn't reach the similarity comparison at all.
-        print(f"DEBUG liveness={result.liveness} threshold={self._settings.face_liveness_threshold}")
+        logger.debug(
+            "liveness=%s threshold=%s", result.liveness, self._settings.face_liveness_threshold
+        )
         if result.liveness < self._settings.face_liveness_threshold:
             await self._repo.record_attempt(
                 employee_id,
