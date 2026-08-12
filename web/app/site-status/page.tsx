@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 
+import AppHeader from "../../components/AppHeader";
 import RequireAuth from "../../components/RequireAuth";
-import { useAuth } from "../../lib/auth-context";
 import { Employee, listEmployees } from "../../lib/employeeService";
 import { Department, listDepartments } from "../../lib/departmentService";
 import { GeofenceEventSummary } from "../../lib/siteStatusService";
@@ -31,7 +30,6 @@ interface SelectedEmployee {
 }
 
 function SiteStatusPageContent() {
-  const { user, logout } = useAuth();
   const { items: exceptions, needsAttentionCount, lastUpdated, error: loadError, loading, refresh } =
     usePollingExceptions(POLL_INTERVAL_MS);
 
@@ -107,38 +105,21 @@ function SiteStatusPageContent() {
   return (
     <div className="flex flex-1">
       <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-          <div className="flex items-center gap-4">
-            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-              Geofence Monitoring
-            </h1>
-            <span className="text-sm text-zinc-500">Who&apos;s outside their authorized zone, right now.</span>
-            <Link href="/geofences" className="text-sm text-blue-600 underline">
-              Geofences
-            </Link>
-            <Link href="/employees" className="text-sm text-blue-600 underline">
-              Employees
-            </Link>
-            <Link href="/face-enrollment" className="text-sm text-blue-600 underline">
-              Face Enrollment
-            </Link>
-          </div>
-          <div className="flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
-            <button onClick={refresh} className="underline">
-              Refresh
-            </button>
-            <button
-              onClick={() => setShowEmployeeSearch((v) => !v)}
-              className="underline"
-            >
-              Look up checked-out employee
-            </button>
-            <span>{user?.full_name} ({user?.role})</span>
-            <button onClick={() => logout()} className="underline">
-              Sign out
-            </button>
-          </div>
-        </header>
+        <AppHeader
+          current="site-status"
+          title="Geofence Monitoring"
+          subtitle="Who's outside their authorized zone, right now."
+          extraActions={
+            <>
+              <button onClick={refresh} className="underline">
+                Refresh
+              </button>
+              <button onClick={() => setShowEmployeeSearch((v) => !v)} className="underline">
+                Look up checked-out employee
+              </button>
+            </>
+          }
+        />
 
         {showEmployeeSearch && (
           <div className="relative mx-6 mt-4">

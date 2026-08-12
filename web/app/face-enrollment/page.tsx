@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { AxiosError } from "axios";
 
+import AppHeader from "../../components/AppHeader";
 import RequireAuth from "../../components/RequireAuth";
-import { useAuth } from "../../lib/auth-context";
 import { Employee, listEmployees } from "../../lib/employeeService";
 import { FaceStatus, enrollFace, getFaceStatus } from "../../lib/faceService";
 
@@ -25,7 +24,6 @@ interface PendingPhoto {
 }
 
 function FaceEnrollmentPageContent() {
-  const { user, logout } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -125,28 +123,7 @@ function FaceEnrollmentPageContent() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-            Face Enrollment
-          </h1>
-          <Link href="/geofences" className="text-sm text-blue-600 underline">
-            Geofences
-          </Link>
-          <Link href="/employees" className="text-sm text-blue-600 underline">
-            Employees
-          </Link>
-          <Link href="/site-status" className="text-sm text-blue-600 underline">
-            Site Status
-          </Link>
-        </div>
-        <div className="flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
-          <span>{user?.full_name} ({user?.role})</span>
-          <button onClick={() => logout()} className="underline">
-            Sign out
-          </button>
-        </div>
-      </header>
+      <AppHeader current="face-enrollment" title="Face Enrollment" />
 
       {loadError && (
         <p className="mx-6 mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
