@@ -14,6 +14,7 @@ from app.routes import (
     face,
     geofences,
     health,
+    problem_reports,
     sessions,
 )
 
@@ -91,3 +92,4 @@ app.include_router(employees.router)
 app.include_router(geofences.router)
 app.include_router(attendance.router)
 app.include_router(face.router)
+app.include_router(problem_reports.router)

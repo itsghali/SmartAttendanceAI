@@ -140,3 +140,11 @@ class FaceMismatchError(DomainError):
 
 class LivenessCheckFailedError(DomainError):
     pass
+
+
+class ProblemReportNotFoundError(DomainError):
+    pass
+
+
+class ProblemReportAlreadyResolvedError(DomainError):
+    pass

@@ -38,6 +38,9 @@ PERMISSIONS = {
     "attendance:read:own": "View your own attendance history",
     "attendance:read:all": "View any employee's attendance records",
     "attendance:correct": "Create manual/backfill entries and correct existing attendance records",
+    "problem_reports:create:own": "Report a problem to HR",
+    "problem_reports:read:all": "View employee-submitted problem reports",
+    "problem_reports:resolve": "Mark a problem report as resolved",
 }
 
 ROLE_PERMISSIONS: dict[str, list[str]] = {
@@ -54,6 +57,8 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "geofence_events:read",
         "attendance:read:all",
         "attendance:correct",
+        "problem_reports:read:all",
+        "problem_reports:resolve",
     ],
     "hr_manager": [
         "users:read",
@@ -65,6 +70,8 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "geofence_events:read",
         "attendance:read:all",
         "attendance:correct",
+        "problem_reports:read:all",
+        "problem_reports:resolve",
     ],
     "supervisor": ["users:read", "attendance:read:all", "attendance:correct"],
     "employee": [
@@ -74,6 +81,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "sessions:manage:own",
         "attendance:record:own",
         "attendance:read:own",
+        "problem_reports:create:own",
     ],
     "auditor": ["users:read", "audit_logs:read", "geofences:read", "attendance:read:all"],
 }

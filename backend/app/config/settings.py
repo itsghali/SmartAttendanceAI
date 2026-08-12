@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     face_action_rate_limit_per_window: int = Field(default=10)
     face_action_rate_limit_window_seconds: int = Field(default=60)
 
+    # Free-text employee-submitted problem reports — infrequent by nature, so
+    # a tighter window than the action endpoints above is enough to stop
+    # spam without ever bothering a genuine user.
+    problem_report_rate_limit_per_window: int = Field(default=5)
+    problem_report_rate_limit_window_seconds: int = Field(default=300)
+
     # Application-layer encryption for FaceProfile.embedding at rest (see
     # PLAN.md item 5). Newest key first — encryption always uses the first
     # key; decryption tries each in order, so rotation is "prepend a new key,

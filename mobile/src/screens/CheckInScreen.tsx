@@ -124,6 +124,14 @@ export function CheckInScreen({ navigation }: NativeStackScreenProps<any>) {
             <Text style={styles.logout}>History</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            testID="report-problem-button"
+            accessibilityRole="button"
+            accessibilityLabel="Report a problem"
+            onPress={() => navigation.navigate("ReportProblem", { attendanceId: today?.id ?? null })}
+          >
+            <Text style={styles.logout}>Report</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             testID="logout-button"
             accessibilityRole="button"
             accessibilityLabel="Log out"

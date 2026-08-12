@@ -7,6 +7,7 @@ import { CheckInScreen } from "../screens/CheckInScreen";
 import { HistoryScreen } from "../screens/HistoryScreen";
 import { LoginScreen } from "../screens/LoginScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
+import { ReportProblemScreen } from "../screens/ReportProblemScreen";
 import { restoreSession } from "../store/authSlice";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 
@@ -35,6 +36,7 @@ export function RootNavigator() {
           <>
             <Stack.Screen name="CheckIn" component={CheckInScreen} />
             <Stack.Screen name="History" component={HistoryScreen} />
+            <Stack.Screen name="ReportProblem" component={ReportProblemScreen} />
           </>
         ) : (
           <>

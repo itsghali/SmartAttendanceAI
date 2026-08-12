@@ -12,6 +12,7 @@ from app.models.face_verification_attempt import (
 from app.models.geofence import Geofence, GeofenceBoundaryType
 from app.models.geofence_event import GeofenceEvent, GeofenceEventType
 from app.models.otp import OTPCode, OTPPurpose
+from app.models.problem_report import ProblemReport, ProblemReportStatus
 from app.models.refresh_token import RefreshToken
 from app.models.role import Permission, Role, role_permissions
 from app.models.user import User
@@ -34,6 +35,8 @@ __all__ = [
     "GeofenceEventType",
     "OTPCode",
     "OTPPurpose",
+    "ProblemReport",
+    "ProblemReportStatus",
     "RefreshToken",
     "Permission",
     "Role",

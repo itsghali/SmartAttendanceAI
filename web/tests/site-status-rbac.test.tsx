@@ -22,6 +22,9 @@ vi.mock("../lib/employeeService", () => ({
 vi.mock("../lib/departmentService", () => ({
   listDepartments: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("../lib/problemReportService", () => ({
+  listProblemReports: vi.fn().mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 }),
+}));
 
 import SiteStatusPage from "../app/site-status/page";
 
