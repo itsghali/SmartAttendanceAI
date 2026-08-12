@@ -22,6 +22,10 @@ class InvalidOTPError(DomainError):
     pass
 
 
+class InvalidSignupCodeError(DomainError):
+    pass
+
+
 class InvalidRefreshTokenError(DomainError):
     pass
 

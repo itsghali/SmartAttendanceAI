@@ -30,6 +30,14 @@ class Settings(BaseSettings):
 
     otp_expire_minutes: int = Field(default=10)
 
+    # Gates self-service admin/hr/super_admin signup (web dashboard only —
+    # mobile signup always defaults to the "employee" role and never checks
+    # this). Unset/empty means privileged signup is hard-disabled: register()
+    # rejects every request that names a role, never falling open. Set via
+    # env var ADMIN_SIGNUP_CODE, shared out-of-band with whoever should be
+    # able to create HR/Admin/SuperAdmin accounts.
+    admin_signup_code: str | None = Field(default=None)
+
     attendance_max_accuracy_meters: float = Field(default=100.0)
 
     # Continuous geofence monitoring (see PLAN.md Phase 3 Eng Section 1 finding 6).

@@ -133,6 +133,9 @@ function FaceEnrollmentPageContent() {
           <Link href="/geofences" className="text-sm text-blue-600 underline">
             Geofences
           </Link>
+          <Link href="/employees" className="text-sm text-blue-600 underline">
+            Employees
+          </Link>
           <Link href="/site-status" className="text-sm text-blue-600 underline">
             Site Status
           </Link>

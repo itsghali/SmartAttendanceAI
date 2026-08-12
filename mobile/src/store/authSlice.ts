@@ -2,6 +2,7 @@ import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 import * as authService from "../services/authService";
 import { clearTokens } from "../services/tokenStorage";
+import { extractErrorMessage } from "../utils/apiError";
 import type { User } from "../services/authService";
 
 export type AuthStatus = "idle" | "loading" | "authenticated" | "unauthenticated";
@@ -29,8 +30,12 @@ export const restoreSession = createAsyncThunk("auth/restoreSession", async () =
 
 export const login = createAsyncThunk(
   "auth/login",
-  async ({ email, password }: { email: string; password: string }) => {
-    return authService.login(email, password);
+  async ({ email, password }: { email: string; password: string }, { rejectWithValue }) => {
+    try {
+      return await authService.login(email, password);
+    } catch (error) {
+      return rejectWithValue(extractErrorMessage(error));
+    }
   },
 );
 
@@ -70,7 +75,7 @@ const authSlice = createSlice({
       })
       .addCase(login.rejected, (state, action) => {
         state.status = "unauthenticated";
-        state.error = action.error.message ?? "login failed";
+        state.error = (action.payload as string) ?? "login failed";
       })
       .addCase(logout.fulfilled, (state) => {
         state.user = null;

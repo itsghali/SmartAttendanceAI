@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,8 +9,9 @@ _extract_otp = extract_otp
 
 
 @pytest.mark.asyncio
-async def test_register_creates_unverified_user(client, caplog, unique_email):
-    caplog.set_level(logging.INFO, logger="app.email")
+async def test_register_creates_verified_user(client, unique_email):
+    # No email step — self-registered accounts are usable immediately,
+    # same as HR-onboarded accounts.
     resp = await client.post(
         "/auth/register",
         json={"email": unique_email, "password": "Password123", "full_name": "Jane Doe"},
@@ -17,19 +19,116 @@ async def test_register_creates_unverified_user(client, caplog, unique_email):
     assert resp.status_code == 201
     body = resp.json()
     assert body["email"] == unique_email
-    assert body["is_verified"] is False
+    assert body["is_verified"] is True
     assert body["role"] == "employee"
-    assert "verification code is" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_register_duplicate_email_rejected(client, caplog, unique_email):
-    caplog.set_level(logging.INFO, logger="app.email")
+async def test_register_duplicate_email_rejected(client, unique_email):
     payload = {"email": unique_email, "password": "Password123", "full_name": "Jane Doe"}
     first = await client.post("/auth/register", json=payload)
     assert first.status_code == 201
     second = await client.post("/auth/register", json=payload)
     assert second.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_register_with_phone_number_is_persisted(client, unique_email):
+    resp = await client.post(
+        "/auth/register",
+        json={
+            "email": unique_email,
+            "password": "Password123",
+            "full_name": "Jane Doe",
+            "phone_number": "+15551234567",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["phone_number"] == "+15551234567"
+
+
+@pytest.mark.asyncio
+async def test_register_privileged_role_rejected_when_signup_code_not_configured(
+    client, unique_email, monkeypatch
+):
+    # ADMIN_SIGNUP_CODE unset (default) — privileged self-signup must fail
+    # closed, not silently fall back to "employee".
+    monkeypatch.setattr(
+        "app.services.auth_service.get_settings",
+        lambda: SimpleNamespace(admin_signup_code=None),
+    )
+    resp = await client.post(
+        "/auth/register",
+        json={
+            "email": unique_email,
+            "password": "Password123",
+            "full_name": "Jane Doe",
+            "role": "admin",
+            "setup_code": "anything",
+        },
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_register_privileged_role_wrong_setup_code_rejected(
+    client, unique_email, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.services.auth_service.get_settings",
+        lambda: SimpleNamespace(admin_signup_code="correct-code"),
+    )
+    resp = await client.post(
+        "/auth/register",
+        json={
+            "email": unique_email,
+            "password": "Password123",
+            "full_name": "Jane Doe",
+            "role": "super_admin",
+            "setup_code": "wrong-code",
+        },
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_register_privileged_role_correct_setup_code_succeeds(
+    client, unique_email, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.services.auth_service.get_settings",
+        lambda: SimpleNamespace(admin_signup_code="correct-code"),
+    )
+    resp = await client.post(
+        "/auth/register",
+        json={
+            "email": unique_email,
+            "password": "Password123",
+            "full_name": "Jane Doe",
+            "phone_number": "+15551234567",
+            "role": "hr_manager",
+            "setup_code": "correct-code",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["role"] == "hr_manager"
+    assert body["phone_number"] == "+15551234567"
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_role_outside_allowed_set(client, unique_email):
+    resp = await client.post(
+        "/auth/register",
+        json={
+            "email": unique_email,
+            "password": "Password123",
+            "full_name": "Jane Doe",
+            "role": "supervisor",
+            "setup_code": "whatever",
+        },
+    )
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -42,21 +141,7 @@ async def test_register_rejects_weak_password(client, unique_email):
 
 
 @pytest.mark.asyncio
-async def test_verify_email_wrong_code_rejected(client, caplog, unique_email):
-    caplog.set_level(logging.INFO, logger="app.email")
-    await client.post(
-        "/auth/register",
-        json={"email": unique_email, "password": "Password123", "full_name": "Jane Doe"},
-    )
-    resp = await client.post(
-        "/auth/verify-email", json={"email": unique_email, "code": "000000"}
-    )
-    assert resp.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_login_requires_verified_email(client, caplog, unique_email):
-    caplog.set_level(logging.INFO, logger="app.email")
+async def test_login_succeeds_immediately_after_register(client, unique_email):
     await client.post(
         "/auth/register",
         json={"email": unique_email, "password": "Password123", "full_name": "Jane Doe"},
@@ -64,7 +149,7 @@ async def test_login_requires_verified_email(client, caplog, unique_email):
     resp = await client.post(
         "/auth/login", json={"email": unique_email, "password": "Password123"}
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200, resp.text
 
 
 @pytest.mark.asyncio

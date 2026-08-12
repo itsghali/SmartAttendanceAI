@@ -14,31 +14,43 @@ def _validate_password_strength(value: str) -> str:
     return value
 
 
+PRIVILEGED_SIGNUP_ROLES = {"admin", "hr_manager", "super_admin"}
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=1, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=50)
+    # Web-dashboard-only: request admin/hr/super_admin instead of the default
+    # "employee" role. Requires setup_code to match ADMIN_SIGNUP_CODE server-side
+    # — see AuthService.register. Mobile signup never sends this.
+    role: str | None = Field(default=None)
+    setup_code: str | None = Field(default=None, max_length=255)
 
     @field_validator("password")
     @classmethod
     def check_password_strength(cls, value: str) -> str:
         return _validate_password_strength(value)
 
+    @field_validator("role")
+    @classmethod
+    def check_role(cls, value: str | None) -> str | None:
+        if value is not None and value not in PRIVILEGED_SIGNUP_ROLES:
+            raise ValueError(f"role must be one of {sorted(PRIVILEGED_SIGNUP_ROLES)}")
+        return value
+
 
 class UserOut(BaseModel):
     id: uuid.UUID
     email: str
     full_name: str
+    phone_number: str | None = None
     role: str
     is_active: bool
     is_verified: bool
 
     model_config = {"from_attributes": True}
-
-
-class VerifyEmailRequest(BaseModel):
-    email: EmailStr
-    code: str = Field(min_length=6, max_length=6)
 
 
 class LoginRequest(BaseModel):

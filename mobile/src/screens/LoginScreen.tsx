@@ -10,10 +10,12 @@ import {
   View,
 } from "react-native";
 
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
+
 import { login } from "../store/authSlice";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 
-export function LoginScreen() {
+export function LoginScreen({ navigation }: NativeStackScreenProps<any>) {
   const dispatch = useAppDispatch();
   const status = useAppSelector((state) => state.auth.status);
   const error = useAppSelector((state) => state.auth.error);
@@ -65,6 +67,14 @@ export function LoginScreen() {
           <Text style={styles.buttonText}>Log in</Text>
         )}
       </TouchableOpacity>
+
+      <TouchableOpacity
+        testID="go-to-register"
+        style={styles.linkButton}
+        onPress={() => navigation.navigate("Register")}
+      >
+        <Text style={styles.linkText}>Need an account? Sign up</Text>
+      </TouchableOpacity>
     </KeyboardAvoidingView>
   );
 }
@@ -109,5 +119,13 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+  },
+  linkButton: {
+    marginTop: 16,
+    alignItems: "center",
+  },
+  linkText: {
+    color: "#2563eb",
+    fontSize: 14,
   },
 });

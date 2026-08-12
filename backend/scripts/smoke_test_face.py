@@ -13,26 +13,19 @@ start the server with it set, and pass the matching flag to this script:
 
     FACE_VERIFICATION_ENABLED=true uvicorn app.main:app --port 8001 > server.log 2>&1 &
     python -m scripts.smoke_test_face --base-url http://localhost:8001 \
-        --log-file server.log --face-verification-enabled
+        --face-verification-enabled
 
 Run it again WITHOUT setting the env var and WITHOUT the CLI flag to confirm
 the flag-off regression guard instead (check-in still works with no selfie;
 the standalone /face/enroll and /face/verify calls will correctly 503 — that
 is expected, not a bug, when the flag is off).
-
-The dev server logs OTP codes instead of emailing them when SMTP isn't
-configured (see app/services/email_service.py) — this script tails that log
-to grab the verification code automatically, mirroring what
-backend/tests/conftest.py's extract_otp() does against pytest's caplog.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
-import re
 import sys
-import time
 import uuid
 from pathlib import Path
 
@@ -79,24 +72,9 @@ def build_fixtures(tmp_dir: Path) -> tuple[Path, Path, Path]:
     return paths[0], paths[1], spoof_path
 
 
-def extract_otp(log_text: str) -> str:
-    matches = re.findall(r"verification code is (\d{6})", log_text)
-    if not matches:
-        raise AssertionError("no OTP code found in server log")
-    return matches[-1]
-
-
-def tail_new_content(log_file: Path, since_pos: int) -> tuple[str, int]:
-    with open(log_file, "r", errors="ignore") as f:
-        f.seek(since_pos)
-        content = f.read()
-        return content, f.tell()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://localhost:8001")
-    parser.add_argument("--log-file", required=True, help="dev server's stdout log file")
     parser.add_argument("--tmp-dir", default=None)
     parser.add_argument(
         "--face-verification-enabled",
@@ -111,35 +89,22 @@ def main() -> None:
     face_a, face_b, face_a_spoof = build_fixtures(tmp_dir)
     print(f"  face_a={face_a}\n  face_b={face_b}\n  face_a_spoof={face_a_spoof}")
 
-    log_path = Path(args.log_file)
-    log_pos = log_path.stat().st_size if log_path.exists() else 0
-
     client = httpx.Client(base_url=args.base_url, timeout=30.0)
     unique = uuid.uuid4().hex[:12]
     hr_email = f"smoke-hr-{unique}@example.com"
     employee_email = f"smoke-emp-{unique}@example.com"
     password = "SmokeTest123"
 
-    def register_and_verify(email: str) -> None:
+    def register(email: str) -> None:
+        # Self-registration is auto-verified immediately (no email step) —
+        # see AuthService.register.
         resp = client.post("/auth/register", json={
             "email": email, "password": password, "full_name": "Smoke Test User"
         })
         assert resp.status_code == 201, resp.text
-        deadline = time.time() + 5
-        code = None
-        while time.time() < deadline:
-            content, new_pos = tail_new_content(log_path, log_pos)
-            try:
-                code = extract_otp(content)
-                break
-            except AssertionError:
-                time.sleep(0.2)
-        assert code is not None, f"could not find OTP for {email} in server log"
-        resp = client.post("/auth/verify-email", json={"email": email, "code": code})
-        assert resp.status_code == 200, resp.text
 
     print("Registering HR user...")
-    register_and_verify(hr_email)
+    register(hr_email)
     # No HTTP endpoint promotes a role (TODOS.md: "roles:manage has no
     # endpoint") — every existing script/test that needs an HR account hits
     # the DB directly for this one step. Real HTTP is used for everything
@@ -183,7 +148,7 @@ def main() -> None:
     assert resp.status_code == 201, resp.text
     employee_id = resp.json()["id"]
 
-    print("Registering employee's own account (separate OTP)...")
+    print("Logging in as employee...")
     resp = client.post("/auth/login", json={"email": employee_email, "password": "TempPass123"})
     assert resp.status_code == 200, resp.text
     employee_headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}

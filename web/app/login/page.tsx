@@ -1,14 +1,17 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { AxiosError } from "axios";
 
 import { useAuth } from "../../lib/auth-context";
 
-export default function LoginPage() {
+function LoginForm() {
   const { user, loading, login } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const justCreated = searchParams.get("created") === "1";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -48,6 +51,11 @@ export default function LoginPage() {
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           Sign in
         </h1>
+        {justCreated && !error && (
+          <p className="rounded bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-950 dark:text-green-300">
+            Account created — sign in to continue.
+          </p>
+        )}
         {error && (
           <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
             {error}
@@ -100,7 +108,21 @@ export default function LoginPage() {
         >
           {submitting ? "Signing in…" : "Sign in"}
         </button>
+        <p className="text-center text-sm text-zinc-600 dark:text-zinc-400">
+          Need an account?{" "}
+          <Link href="/register" className="font-medium text-zinc-900 underline dark:text-zinc-50">
+            Sign up
+          </Link>
+        </p>
       </form>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

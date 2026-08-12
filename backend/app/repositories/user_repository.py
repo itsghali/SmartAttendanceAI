@@ -32,10 +32,19 @@ class UserRepository:
         return result.scalars().first()
 
     async def create(
-        self, email: str, hashed_password: str, full_name: str, role_id: uuid.UUID
+        self,
+        email: str,
+        hashed_password: str,
+        full_name: str,
+        role_id: uuid.UUID,
+        phone_number: str | None = None,
     ) -> User:
         user = User(
-            email=email, hashed_password=hashed_password, full_name=full_name, role_id=role_id
+            email=email,
+            hashed_password=hashed_password,
+            full_name=full_name,
+            role_id=role_id,
+            phone_number=phone_number,
         )
         self._session.add(user)
         await self._session.flush()

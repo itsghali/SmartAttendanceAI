@@ -57,7 +57,7 @@ async def _face_action_rate_limit(
 
 
 async def _resolve_employee_id(user: User, session: AsyncSession) -> uuid.UUID:
-    employee = await EmployeeService(session).get_by_user_id(user.id)
+    employee = await EmployeeService(session).get_or_create_own_profile(user)
     if employee is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="no employee profile for this account"

@@ -238,6 +238,9 @@ function GeofencesPageContent() {
           <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Geofences
           </h1>
+          <Link href="/employees" className="text-sm text-blue-600 underline">
+            Employees
+          </Link>
           <Link href="/face-enrollment" className="text-sm text-blue-600 underline">
             Face Enrollment
           </Link>

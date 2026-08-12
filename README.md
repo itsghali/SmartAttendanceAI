@@ -33,6 +33,16 @@ cd ../mobile && npm install && copy .env.example .env && npm start
 
 Postgres binds host port **55432** (not the default 5432) — this machine already had something on 5432, so the compose file remaps it. Adjust `DATABASE_URL`/`alembic.ini` if you deploy elsewhere and want the default back.
 
+## Web dashboard signup
+
+`web/app/register` lets HR/Admin/SuperAdmin self-signup (name, email, phone, password, role — admin/hr_manager/super_admin) instead of hand-crafting accounts. It's gated: the form also asks for a **setup code**, checked server-side against `ADMIN_SIGNUP_CODE` in `backend/.env`. Unset → every privileged signup request is rejected (fail-closed), so this is safe to leave off until you actually want it. Generate one and set it before anyone needs to self-signup on web:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(18))"
+```
+
+Put the value in `backend/.env` as `ADMIN_SIGNUP_CODE=...` (and the deployment's env vars if not local), then share it out-of-band with whoever should be able to create HR/Admin/SuperAdmin accounts. Mobile signup (employees) never asks for this — it always defaults to the `employee` role.
+
 ## Local test accounts
 
 > **Local dev only.** These exist in the local Docker Postgres volume, seeded by hand for manual testing. They are throwaway credentials for a database that never leaves this machine — never create accounts like these in a deployed environment, and never point this repo's `.env` at a real database while they exist.

@@ -7,6 +7,7 @@ from app.core.exceptions import (
     InvalidCredentialsError,
     InvalidOTPError,
     InvalidRefreshTokenError,
+    InvalidSignupCodeError,
     UserAlreadyExistsError,
     UserInactiveError,
     UserNotVerifiedError,
@@ -23,7 +24,6 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
     UserOut,
-    VerifyEmailRequest,
 )
 from app.services.auth_service import AuthService
 
@@ -35,29 +35,33 @@ def _user_out(user: User) -> UserOut:
         id=user.id,
         email=user.email,
         full_name=user.full_name,
+        phone_number=user.phone_number,
         role=user.role.name,
         is_active=user.is_active,
         is_verified=user.is_verified,
     )
 
 
-@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=UserOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("register", 10, 60))],
+)
 async def register(body: RegisterRequest, session: AsyncSession = Depends(get_db)) -> UserOut:
     try:
-        user = await AuthService(session).register(body.email, body.password, body.full_name)
+        user = await AuthService(session).register(
+            body.email,
+            body.password,
+            body.full_name,
+            phone_number=body.phone_number,
+            role=body.role,
+            setup_code=body.setup_code,
+        )
     except UserAlreadyExistsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return _user_out(user)
-
-
-@router.post("/verify-email", response_model=UserOut)
-async def verify_email(
-    body: VerifyEmailRequest, session: AsyncSession = Depends(get_db)
-) -> UserOut:
-    try:
-        user = await AuthService(session).verify_email(body.email, body.code)
-    except InvalidOTPError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except InvalidSignupCodeError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return _user_out(user)
 
 

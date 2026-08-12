@@ -61,6 +61,14 @@ class EmployeeRepository:
         stmt = select(func.count()).select_from(Employee)
         return (await self._session.execute(stmt)).scalar_one()
 
+    async def generate_code(self) -> str:
+        base = await self.count_all() + 1
+        for offset in range(10):
+            code = f"EMP-{base + offset:04d}"
+            if await self.get_by_code(code) is None:
+                return code
+        raise RuntimeError("could not generate a unique employee code")
+
     async def list_paginated(
         self, department_id: uuid.UUID | None, limit: int, offset: int
     ) -> tuple[list[Employee], int]:

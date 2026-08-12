@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import { CheckInScreen } from "../screens/CheckInScreen";
 import { LoginScreen } from "../screens/LoginScreen";
+import { RegisterScreen } from "../screens/RegisterScreen";
 import { restoreSession } from "../store/authSlice";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 
@@ -32,7 +33,10 @@ export function RootNavigator() {
         {status === "authenticated" ? (
           <Stack.Screen name="CheckIn" component={CheckInScreen} />
         ) : (
-          <Stack.Screen name="Login" component={LoginScreen} />
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Register" component={RegisterScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

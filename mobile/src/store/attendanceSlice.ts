@@ -1,9 +1,9 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import { AxiosError } from "axios";
 
 import * as attendanceService from "../services/attendanceService";
 import { checkIsJailbroken } from "../services/deviceIntegrityService";
 import { getCurrentPosition } from "../services/locationService";
+import { extractErrorMessage } from "../utils/apiError";
 import { logout, sessionExpired } from "./authSlice";
 import type { Attendance, BreakPeriod } from "../services/attendanceService";
 
@@ -28,19 +28,6 @@ const initialState: AttendanceState = {
   actionStatus: "idle",
   actionError: null,
 };
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof AxiosError) {
-    const detail = error.response?.data?.detail;
-    if (typeof detail === "string") {
-      return detail;
-    }
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "something went wrong";
-}
 
 export const fetchToday = createAsyncThunk(
   "attendance/fetchToday",

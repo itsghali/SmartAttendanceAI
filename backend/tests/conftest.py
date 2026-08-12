@@ -72,16 +72,14 @@ def extract_otp(caplog: pytest.LogCaptureFixture) -> str:
 
 
 async def register_and_verify(client, caplog, email: str, password: str = "Password123") -> None:
-    caplog.set_level(logging.INFO, logger="app.email")
+    # Self-registration auto-verifies now (no email step) — name/signature kept
+    # as-is since every caller across the test suite passes `caplog` and awaits
+    # this helper; `caplog` is simply unused here now.
     resp = await client.post(
         "/auth/register",
         json={"email": email, "password": password, "full_name": "Test User"},
     )
     assert resp.status_code == 201, resp.text
-    code = extract_otp(caplog)
-    caplog.clear()
-    resp = await client.post("/auth/verify-email", json={"email": email, "code": code})
-    assert resp.status_code == 200, resp.text
 
 
 async def promote_to_role(db_session, email: str, role_name: str) -> None:

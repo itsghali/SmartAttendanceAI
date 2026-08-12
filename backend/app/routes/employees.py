@@ -100,7 +100,7 @@ async def list_employees(
 async def get_my_employee_profile(
     user: User = Depends(get_current_user), session: AsyncSession = Depends(get_db)
 ) -> EmployeeOut:
-    employee = await EmployeeService(session).get_by_user_id(user.id)
+    employee = await EmployeeService(session).get_or_create_own_profile(user)
     if employee is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="no employee profile for this account"

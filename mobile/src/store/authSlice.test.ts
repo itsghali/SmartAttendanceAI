@@ -1,4 +1,5 @@
 import { configureStore } from "@reduxjs/toolkit";
+import { AxiosError, AxiosHeaders } from "axios";
 
 import * as authService from "../services/authService";
 import * as tokenStorage from "../services/tokenStorage";
@@ -37,6 +38,33 @@ describe("authSlice", () => {
 
   it("login failure leaves the session unauthenticated with an error", async () => {
     (authService.login as jest.Mock).mockRejectedValue(new Error("invalid email or password"));
+
+    const store = buildStore();
+    await store.dispatch(login({ email: USER.email, password: "wrong" }));
+
+    expect(store.getState().auth.status).toBe("unauthenticated");
+    expect(store.getState().auth.error).toBe("invalid email or password");
+  });
+
+  it("login 401 from the real API surfaces the backend detail, not the raw axios message", async () => {
+    // Regression test: axios's own Error.message for this is the generic
+    // "Request failed with status code 401" — the bug reported was that
+    // string reaching the login screen instead of the backend's actual
+    // "invalid email or password" detail.
+    const axiosError = new AxiosError(
+      "Request failed with status code 401",
+      "ERR_BAD_REQUEST",
+      undefined,
+      undefined,
+      {
+        status: 401,
+        statusText: "Unauthorized",
+        headers: new AxiosHeaders(),
+        config: { headers: new AxiosHeaders() },
+        data: { detail: "invalid email or password" },
+      },
+    );
+    (authService.login as jest.Mock).mockRejectedValue(axiosError);
 
     const store = buildStore();
     await store.dispatch(login({ email: USER.email, password: "wrong" }));

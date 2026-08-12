@@ -13,6 +13,7 @@ from app.core.exceptions import (
 from app.core.security import hash_password
 from app.models.employee import Employee, EmployeeStatus
 from app.models.otp import OTPPurpose
+from app.models.user import User
 from app.repositories.department_repository import DepartmentRepository
 from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.role_repository import RoleRepository
@@ -28,14 +29,6 @@ class EmployeeService:
         self._departments = DepartmentRepository(session)
         self._employees = EmployeeRepository(session)
         self._otp = OTPService(session, email_service)
-
-    async def _generate_employee_code(self) -> str:
-        base = await self._employees.count_all() + 1
-        for offset in range(10):
-            code = f"EMP-{base + offset:04d}"
-            if await self._employees.get_by_code(code) is None:
-                return code
-        raise RuntimeError("could not generate a unique employee code")
 
     async def onboard(
         self,
@@ -68,7 +61,7 @@ class EmployeeService:
         user.role = role
         await self._users.mark_verified(user)
 
-        code = await self._generate_employee_code()
+        code = await self._employees.generate_code()
         employee = await self._employees.create(
             user_id=user.id,
             employee_code=code,
@@ -90,6 +83,30 @@ class EmployeeService:
 
     async def get_by_user_id(self, user_id: uuid.UUID) -> Employee | None:
         return await self._employees.get_by_user_id(user_id)
+
+    async def get_or_create_own_profile(self, user: User) -> Employee | None:
+        """Resolves the Employee row backing `user`'s own account, self-healing
+        a gap left by self-registration before Employee auto-provisioning was
+        added (AuthService.register) — same defaults that path uses. Only
+        auto-provisions for the "employee" role; a privileged account (admin/
+        hr_manager/super_admin) with no Employee row is expected, not a bug,
+        so it still resolves to None there."""
+        employee = await self._employees.get_by_user_id(user.id)
+        if employee is not None or user.role.name != "employee":
+            return employee
+
+        code = await self._employees.generate_code()
+        employee = await self._employees.create(
+            user_id=user.id,
+            employee_code=code,
+            department_id=None,
+            job_title="",
+            phone_number=user.phone_number or "",
+            hire_date=date.today(),
+            supervisor_id=None,
+        )
+        employee.user = user
+        return employee
 
     async def list_paginated(
         self, department_id: uuid.UUID | None, limit: int, offset: int

@@ -112,7 +112,11 @@ async def test_list_employees_filtered_by_department(client, db_session, caplog,
 
     all_employees = await client.get("/employees", headers=headers)
     assert all_employees.status_code == 200
-    assert all_employees.json()["total"] == 2
+    # 2 onboarded below + the HR bootstrap account itself: it self-registered
+    # via /auth/register (auto-creates an Employee row) before being promoted
+    # to hr_manager, and promotion doesn't remove that row — see
+    # AuthService.register / EmployeeService.get_or_create_own_profile.
+    assert all_employees.json()["total"] == 3
 
     eng_only = await client.get(f"/employees?department_id={eng_id}", headers=headers)
     assert eng_only.status_code == 200
@@ -136,6 +140,68 @@ async def test_get_my_employee_profile(client, db_session, caplog, unique_email)
     )
     assert resp.status_code == 200
     assert resp.json()["user"]["email"] == new_hire_email
+
+
+@pytest.mark.asyncio
+async def test_self_registered_employee_has_profile_and_appears_in_hr_list(
+    client, db_session, caplog, unique_email
+):
+    # Mobile-style self-signup (no role) — must get an Employee row immediately,
+    # not just on first attendance action, so HR sees them in the dashboard
+    # right away.
+    resp = await client.post(
+        "/auth/register",
+        json={
+            "email": unique_email,
+            "password": "Password123",
+            "full_name": "Self Signup",
+            "phone_number": "+15551230000",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    access = await login(client, unique_email, password="Password123")
+    me = await client.get("/employees/me", headers={"Authorization": f"Bearer {access}"})
+    assert me.status_code == 200, me.text
+    body = me.json()
+    assert body["user"]["email"] == unique_email
+    assert body["phone_number"] == "+15551230000"
+    assert body["employee_code"].startswith("EMP-")
+
+    hr_access = await _make_hr_manager(client, db_session, caplog, f"hr-{unique_email}")
+    listing = await client.get(
+        "/employees", headers={"Authorization": f"Bearer {hr_access}"}
+    )
+    assert listing.status_code == 200
+    emails = [e["user"]["email"] for e in listing.json()["items"]]
+    assert unique_email in emails
+
+
+@pytest.mark.asyncio
+async def test_privileged_signup_does_not_get_employee_profile(
+    client, unique_email, monkeypatch
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "app.services.auth_service.get_settings",
+        lambda: SimpleNamespace(admin_signup_code="correct-code"),
+    )
+    resp = await client.post(
+        "/auth/register",
+        json={
+            "email": unique_email,
+            "password": "Password123",
+            "full_name": "Admin Signup",
+            "role": "admin",
+            "setup_code": "correct-code",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    access = await login(client, unique_email, password="Password123")
+    me = await client.get("/employees/me", headers={"Authorization": f"Bearer {access}"})
+    assert me.status_code == 404
 
 
 @pytest.mark.asyncio

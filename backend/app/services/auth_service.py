@@ -1,9 +1,13 @@
+from datetime import date
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import get_settings
 from app.core.exceptions import (
     InvalidCredentialsError,
     InvalidOTPError,
     InvalidRefreshTokenError,
+    InvalidSignupCodeError,
     UserAlreadyExistsError,
     UserInactiveError,
     UserNotVerifiedError,
@@ -19,6 +23,7 @@ from app.models.device import Device
 from app.models.otp import OTPPurpose
 from app.models.user import User
 from app.repositories.device_repository import DeviceRepository
+from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.role_repository import RoleRepository
 from app.repositories.user_repository import UserRepository
@@ -34,34 +39,71 @@ class AuthService:
         self._users = UserRepository(session)
         self._roles = RoleRepository(session)
         self._devices = DeviceRepository(session)
+        self._employees = EmployeeRepository(session)
         self._refresh_tokens = RefreshTokenRepository(session)
         self._otp = OTPService(session, email_service)
 
-    async def register(self, email: str, password: str, full_name: str) -> User:
+    async def register(
+        self,
+        email: str,
+        password: str,
+        full_name: str,
+        phone_number: str | None = None,
+        role: str | None = None,
+        setup_code: str | None = None,
+    ) -> User:
         if await self._users.get_by_email(email) is not None:
             raise UserAlreadyExistsError(f"user with email {email} already exists")
 
-        role = await self._roles.get_by_name(DEFAULT_ROLE_NAME)
-        if role is None:
+        role_name = DEFAULT_ROLE_NAME
+        if role is not None:
+            # Privileged self-signup (web dashboard only) — fails closed:
+            # no ADMIN_SIGNUP_CODE configured means every such request is
+            # rejected, never silently downgraded to "employee".
+            configured_code = get_settings().admin_signup_code
+            if not configured_code or setup_code != configured_code:
+                raise InvalidSignupCodeError("invalid or missing setup code")
+            role_name = role
+
+        role_obj = await self._roles.get_by_name(role_name)
+        if role_obj is None:
             raise RuntimeError(
-                f"default role '{DEFAULT_ROLE_NAME}' is not seeded — run the RBAC seed script"
+                f"role '{role_name}' is not seeded — run the RBAC seed script"
             )
 
         user = await self._users.create(
             email=email,
             hashed_password=hash_password(password),
             full_name=full_name,
-            role_id=role.id,
+            role_id=role_obj.id,
+            phone_number=phone_number,
         )
-        user.role = role
-        await self._otp.issue(user, OTPPurpose.EMAIL_VERIFICATION)
-        return user
-
-    async def verify_email(self, email: str, code: str) -> User:
-        user = await self._users.get_by_email(email)
-        if user is None or not await self._otp.verify(user, OTPPurpose.EMAIL_VERIFICATION, code):
-            raise InvalidOTPError("invalid or expired verification code")
+        user.role = role_obj
+        # No email verification step — self-registered accounts are usable
+        # immediately, matching HR-onboarded accounts (EmployeeService also
+        # auto-verifies on creation).
         await self._users.mark_verified(user)
+
+        if role_name == DEFAULT_ROLE_NAME:
+            # Mobile self-signup is how "employee" accounts are created (HR
+            # onboarding is the other path, via EmployeeService.onboard) — an
+            # Employee row must exist immediately so the account can check in
+            # and shows up in the HR/Admin dashboard's employee list right
+            # away, not just after the first attendance action creates one
+            # lazily (see EmployeeService.get_or_create_own_profile).
+            # Privileged web signups (admin/hr_manager/super_admin) are
+            # internal ops accounts, not on-site staff — no Employee row.
+            code = await self._employees.generate_code()
+            await self._employees.create(
+                user_id=user.id,
+                employee_code=code,
+                department_id=None,
+                job_title="",
+                phone_number=phone_number or "",
+                hire_date=date.today(),
+                supervisor_id=None,
+            )
+
         return user
 
     async def login(
