@@ -73,7 +73,13 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "problem_reports:read:all",
         "problem_reports:resolve",
     ],
-    "supervisor": ["users:read", "attendance:read:all", "attendance:correct"],
+    "supervisor": [
+        "users:read",
+        "attendance:read:all",
+        "attendance:correct",
+        "problem_reports:read:all",
+        "problem_reports:resolve",
+    ],
     "employee": [
         "devices:read:own",
         "devices:manage:own",
