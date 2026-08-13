@@ -36,7 +36,7 @@ class FaceRepository:
         profile.model_name = model_name
         profile.embedding_dimension = embedding_dimension
         profile.enrollment_photo_count = enrollment_photo_count
-        await self._session.commit()
+        await self._session.flush()
         return profile
 
     async def record_attempt(
@@ -55,7 +55,7 @@ class FaceRepository:
             failure_reason=failure_reason,
         )
         self._session.add(attempt)
-        await self._session.commit()
+        await self._session.flush()
         return attempt
 
     async def list_attempts_for_employee(
