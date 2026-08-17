@@ -1,6 +1,6 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["fraud_detection/tests"]
+testpaths = ["fraud_detection/tests", "workforce_intelligence/tests"]
 
 [tool.ruff]
 line-length = 100

@@ -33,10 +33,27 @@ class GeofenceEventRepository:
         await self._session.flush()
         return event
 
+    async def bulk_create_synthetic(self, rows: list[dict]) -> list[GeofenceEvent]:
+        """Mirrors AttendanceRepository.bulk_create_synthetic (PLAN.md T12) —
+        one flush for the whole batch, is_synthetic=True hardcoded here.
+        Unlike Attendance/BreakPeriod, GeofenceEvent has no business
+        timestamp column of its own — ordering is entirely on created_at, so
+        the caller MUST pass an explicit created_at per row (the generator's
+        computed ENTER/EXIT/RETURN offset) rather than let TimestampMixin's
+        insert-time default apply, or a whole batch would collapse onto one
+        real timestamp and lose event ordering."""
+        records = [GeofenceEvent(is_synthetic=True, **row) for row in rows]
+        self._session.add_all(records)
+        await self._session.flush()
+        return records
+
     async def get_latest_for_attendance(self, attendance_id: uuid.UUID) -> GeofenceEvent | None:
         stmt = (
             select(GeofenceEvent)
-            .where(GeofenceEvent.attendance_id == attendance_id)
+            .where(
+                GeofenceEvent.attendance_id == attendance_id,
+                GeofenceEvent.is_synthetic.is_(False),
+            )
             .order_by(GeofenceEvent.created_at.desc())
             .limit(1)
         )
@@ -69,7 +86,7 @@ class GeofenceEventRepository:
         volume" reasoning as list_open() and list_all_for_employee.
         """
         stmt = select(GeofenceEvent).options(selectinload(GeofenceEvent.geofence)).where(
-            GeofenceEvent.employee_id == employee_id
+            GeofenceEvent.employee_id == employee_id, GeofenceEvent.is_synthetic.is_(False)
         )
         if date_from is not None:
             start = datetime.combine(date_from, time.min, tzinfo=timezone.utc)

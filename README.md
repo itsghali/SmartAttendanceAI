@@ -51,14 +51,7 @@ Every account below was verified working (`HTTP 200` on `/auth/login`) at the ti
 
 **One per role** — use these to check RBAC (`403` vs `200`) on any endpoint:
 
-| Email | Password | Role | State |
-|---|---|---|---|
-| `superadmin@example.com` | `Sadmin12345` | super_admin | Every permission |
-| `admin@example.com` | `Admin12345` | admin | Org-wide admin |
-| `hr@example.com` | `Hr12345678` | hr_manager | Onboards employees, manages geofences |
-| `supervisor@example.com` | `Super12345` | supervisor | Supervises `onbreak@` and `closed@` |
-| `auditor@example.com` | `Audit12345` | auditor | Read-only |
-| `test1@example.com` | `Test12345` | employee | Clean — not checked in |
+ 
 
 ### Permissions by role
 

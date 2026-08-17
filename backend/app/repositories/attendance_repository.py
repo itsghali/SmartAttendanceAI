@@ -55,8 +55,55 @@ class AttendanceRepository:
         await self._session.flush()
         return await self.get_by_id(attendance.id)
 
+    async def bulk_create_synthetic(self, rows: list[dict]) -> list[Attendance]:
+        """Bulk-insert pre-built synthetic Attendance rows in one flush
+        (PLAN.md T12) — not a loop of create_check_in(), which is built for
+        the single-row live check-in path (one flush per call, no
+        synthetic_run_id/synthetic_anomaly_type parameters) and would be
+        O(n) round trips for a batch generation run. is_synthetic=True is
+        hardcoded here, never taken from the caller's dict, so this method
+        can never be reused to accidentally write a real-looking row.
+        Returns rows in the same order as the input, with ids populated, so
+        the caller can attach BreakPeriod/GeofenceEvent rows to the right
+        attendance_id."""
+        records = [Attendance(is_synthetic=True, **row) for row in rows]
+        self._session.add_all(records)
+        await self._session.flush()
+        return records
+
+    async def list_for_baseline_including_synthetic(
+        self, employee_ids: list[uuid.UUID], date_from: date, date_to: date
+    ) -> list[Attendance]:
+        """Module 2's ONE legitimate exception to the T0/T1 rule ("every read
+        path filters is_synthetic=false by default") — a baseline built only
+        from real history would be empty right now (synthetic data is this
+        system's only bootstrap corpus per PLAN.md), so this deliberately
+        returns BOTH real and synthetic rows. Do not reuse this method for
+        anything HR/Admin-facing; it exists only for
+        workforce_intelligence_service's baseline rebuild. Eager-loads
+        breaks + geofence_events (not employee/check_in_geofence/
+        check_out_geofence — the baseline builder never touches those) so
+        the whole batch is one round trip, not N+1 (PLAN.md T7)."""
+        if not employee_ids:
+            return []
+        stmt = (
+            select(Attendance)
+            .options(selectinload(Attendance.breaks), selectinload(Attendance.geofence_events))
+            .where(
+                Attendance.employee_id.in_(employee_ids),
+                Attendance.attendance_date >= date_from,
+                Attendance.attendance_date <= date_to,
+            )
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_by_id(self, attendance_id: uuid.UUID) -> Attendance | None:
-        stmt = select(Attendance).options(*_EAGER).where(Attendance.id == attendance_id)
+        stmt = (
+            select(Attendance)
+            .options(*_EAGER)
+            .where(Attendance.id == attendance_id, Attendance.is_synthetic.is_(False))
+        )
         result = await self._session.execute(stmt)
         return result.scalars().first()
 
@@ -76,6 +123,7 @@ class AttendanceRepository:
             .where(
                 Attendance.employee_id == employee_id,
                 Attendance.attendance_date == attendance_date,
+                Attendance.is_synthetic.is_(False),
             )
         )
         result = await self._session.execute(stmt)
@@ -87,13 +135,23 @@ class AttendanceRepository:
         against a new check-in. Manual/backfilled entries have no check_out
         coordinates (see create_manual_entry) and are naturally skipped by the
         caller checking check_out_latitude/longitude for None, not filtered
-        out of this query itself."""
+        out of this query itself.
+
+        is_synthetic=False is load-bearing here, not decorative (PLAN.md T0):
+        this query feeds the live, check-in-BLOCKING impossible-travel gate
+        (attendance_service._check_impossible_travel_or_raise). Without this
+        filter, a synthetic "far-away checkout" row (Workforce Intelligence's
+        own generator, Sprint 3) would be compared against a real employee's
+        next REAL check-in and could block it — a synthetic-data feature
+        breaking a real employee's ability to check in.
+        """
         stmt = (
             select(Attendance)
             .options(*_EAGER)
             .where(
                 Attendance.employee_id == employee_id,
                 Attendance.check_out_at.is_not(None),
+                Attendance.is_synthetic.is_(False),
             )
             .order_by(Attendance.check_out_at.desc())
             .limit(1)
@@ -114,6 +172,7 @@ class AttendanceRepository:
             .where(
                 Attendance.employee_id == employee_id,
                 Attendance.check_out_at.is_(None),
+                Attendance.is_synthetic.is_(False),
             )
             .order_by(Attendance.check_in_at.desc())
         )
@@ -136,6 +195,7 @@ class AttendanceRepository:
             .where(
                 Attendance.employee_id == employee_id,
                 Attendance.check_out_at.is_(None),
+                Attendance.is_synthetic.is_(False),
             )
             .order_by(Attendance.check_in_at.desc())
             .with_for_update()
@@ -152,6 +212,7 @@ class AttendanceRepository:
             .where(
                 Attendance.employee_id == employee_id,
                 Attendance.attendance_date == attendance_date,
+                Attendance.is_synthetic.is_(False),
             )
             .order_by(Attendance.check_in_at.asc())
         )
@@ -182,7 +243,11 @@ class AttendanceRepository:
         pagination axis" reasoning as list_open(). Feeds the History timeline's
         check-in/check-out entries (merged app-level with geofence_events in
         the route, then paginated together — see get_employee_geofence_history)."""
-        stmt = select(Attendance).options(*_EAGER).where(Attendance.employee_id == employee_id)
+        stmt = (
+            select(Attendance)
+            .options(*_EAGER)
+            .where(Attendance.employee_id == employee_id, Attendance.is_synthetic.is_(False))
+        )
         if date_from is not None:
             stmt = stmt.where(Attendance.attendance_date >= date_from)
         if date_to is not None:
@@ -206,7 +271,7 @@ class AttendanceRepository:
         stmt = (
             select(Attendance)
             .options(*_EAGER, selectinload(Attendance.employee).selectinload(Employee.user))
-            .where(Attendance.check_out_at.is_(None))
+            .where(Attendance.check_out_at.is_(None), Attendance.is_synthetic.is_(False))
             .order_by(Attendance.check_in_at.asc())
         )
         result = await self._session.execute(stmt)
@@ -221,8 +286,10 @@ class AttendanceRepository:
         limit: int,
         offset: int,
     ) -> tuple[list[Attendance], int]:
-        stmt = select(Attendance).options(*_EAGER)
-        count_stmt = select(func.count()).select_from(Attendance)
+        stmt = select(Attendance).options(*_EAGER).where(Attendance.is_synthetic.is_(False))
+        count_stmt = (
+            select(func.count()).select_from(Attendance).where(Attendance.is_synthetic.is_(False))
+        )
 
         if department_id is not None:
             stmt = stmt.join(Employee, Attendance.employee_id == Employee.id).where(

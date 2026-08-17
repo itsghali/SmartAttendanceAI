@@ -57,6 +57,17 @@ class EmployeeRepository:
         result = await self._session.execute(stmt)
         return result.scalars().first()
 
+    async def list_by_ids(self, employee_ids: list[uuid.UUID]) -> list[Employee]:
+        """Lean, no-eager-load bulk fetch (T7) — callers here only touch
+        plain columns (department_id, status, hire_date), never the
+        user/department relationships _EAGER loads for the HR-list-view
+        methods above, so this skips that cost entirely."""
+        if not employee_ids:
+            return []
+        stmt = select(Employee).where(Employee.id.in_(employee_ids))
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def count_all(self) -> int:
         stmt = select(func.count()).select_from(Employee)
         return (await self._session.execute(stmt)).scalar_one()

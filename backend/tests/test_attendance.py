@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.models.attendance import Attendance, AttendanceStatus
 from tests.conftest import login, promote_to_role, register_and_verify
 
 OFFICE_LAT = 36.8065
@@ -403,6 +404,52 @@ async def test_check_in_impossible_travel_skipped_within_min_elapsed_floor(
         json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG},
         headers=headers,
     )
+    resp = await client.post(
+        "/attendance/check-in",
+        json={"latitude": site_b_lat, "longitude": OFFICE_LNG},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.asyncio
+async def test_check_in_ignores_synthetic_last_completed_session_for_impossible_travel(
+    client, db_session, caplog, unique_email
+):
+    """PLAN.md T0 (CRITICAL): a synthetic 'far-away checkout' row must never
+    be compared against a real employee's real check-in by the
+    impossible-travel gate. Mirrors test_check_in_impossible_travel_blocked's
+    exact shape (same 22km/10min setup that DOES block a real prior session)
+    but the prior session here is synthetic — proving
+    get_last_completed_for_employee's is_synthetic=False filter is load-
+    bearing, not decorative."""
+    employee_access, employee_id, hr_headers = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+    site_b_lat = OFFICE_LAT + 0.2  # ~22km north, same threshold as the real-data test
+    await _create_geofence(
+        client, hr_headers, name="Chantier B", center_latitude=site_b_lat, center_longitude=OFFICE_LNG
+    )
+
+    backdated_checkout = datetime.now(timezone.utc) - timedelta(minutes=10)
+    synthetic = Attendance(
+        employee_id=uuid.UUID(employee_id),
+        attendance_date=backdated_checkout.date(),
+        check_in_at=backdated_checkout - timedelta(hours=1),
+        check_out_at=backdated_checkout,
+        check_out_latitude=OFFICE_LAT,
+        check_out_longitude=OFFICE_LNG,
+        status=AttendanceStatus.PRESENT,
+        is_synthetic=True,
+    )
+    db_session.add(synthetic)
+    await db_session.commit()
+
+    # If the synthetic row above were treated as the "last known position"
+    # (site A, 10 minutes ago), this would be blocked exactly like
+    # test_check_in_impossible_travel_blocked. It must not be — the employee
+    # has no REAL prior session today.
     resp = await client.post(
         "/attendance/check-in",
         json={"latitude": site_b_lat, "longitude": OFFICE_LNG},
