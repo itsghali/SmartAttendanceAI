@@ -31,7 +31,7 @@ from app.core.geo import (
     polygon_centroid,
 )
 from app.models.attendance import Attendance, AttendanceStatus
-from app.models.break_period import BreakPeriod
+from app.models.break_period import BreakPeriod, BreakSource
 from app.models.employee import Employee
 from app.models.geofence import Geofence, GeofenceBoundaryType
 from app.models.geofence_event import GeofenceEventType
@@ -279,7 +279,8 @@ class AttendanceService:
         attendance = await self._attendance.get_open_for_employee(employee.id)
         if attendance is None:
             raise NotCheckedInError("you are not checked in at any site")
-        if await self._breaks.get_open_for_attendance(attendance.id) is not None:
+        open_break = await self._breaks.get_open_for_attendance(attendance.id)
+        if open_break is not None and open_break.source == BreakSource.MANUAL:
             raise BreakStillActiveError("end your break before checking out")
 
         self._check_accuracy(accuracy_meters)
@@ -288,8 +289,22 @@ class AttendanceService:
         )
         await self._verify_face_or_raise(employee, selfie_base64)
 
+        checkout_at = utcnow()
+        if open_break is not None and open_break.source == BreakSource.GEOFENCE_EXIT:
+            # An auto-break from a geofence EXIT only closes itself on the next
+            # RETURN ping (MonitoringService.record_ping) — up to
+            # geofence_ping_interval_seconds stale. An employee who is now
+            # physically back inside the geofence (proven by matched above)
+            # and checking out right now must not be blocked waiting for that
+            # ping, nor left with a break that never closes because the
+            # session is about to end. Close it here with the checkout's own
+            # verified position instead.
+            await self._breaks.end(
+                open_break, checkout_at, latitude, longitude, accuracy_meters, matched.id
+            )
+
         await self._attendance.set_check_out(
-            attendance, utcnow(), latitude, longitude, accuracy_meters, matched.id
+            attendance, checkout_at, latitude, longitude, accuracy_meters, matched.id
         )
         return await self._attendance.get_by_id(attendance.id)
 

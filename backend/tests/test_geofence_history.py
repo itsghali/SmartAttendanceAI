@@ -1,10 +1,12 @@
 import logging
 import uuid
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
 
 from app.config.settings import get_settings
+from app.models.attendance import Attendance
 from app.models.geofence import Geofence
 from app.models.geofence_event import GeofenceEventType
 from app.repositories.geofence_event_repository import GeofenceEventRepository
@@ -356,6 +358,108 @@ async def test_exceptions_list_shows_not_monitored_for_manual_entry(
     row = body["items"][0]
     assert row["monitoring_status"] == "not_monitored"
     assert row["needs_attention"] is False
+
+
+@pytest.mark.asyncio
+async def test_history_shows_duration_for_closed_exit_return_pair(
+    client, db_session, caplog, unique_email
+):
+    hr_headers, employee_id, attendance_id, geofence_id = await _setup_checked_in_employee(
+        client, db_session, caplog, unique_email
+    )
+    repo = GeofenceEventRepository(db_session)
+    exit_event = await repo.create(
+        uuid.UUID(employee_id), uuid.UUID(attendance_id), uuid.UUID(geofence_id),
+        GeofenceEventType.EXIT, FAR_LAT, OFFICE_LNG,
+    )
+    return_event = await repo.create(
+        uuid.UUID(employee_id), uuid.UUID(attendance_id), uuid.UUID(geofence_id),
+        GeofenceEventType.RETURN, OFFICE_LAT, OFFICE_LNG,
+    )
+    # Force a known gap — repo.create() timestamps both at "now", which
+    # would round to 0 minutes and not actually exercise the computation.
+    return_event.created_at = exit_event.created_at + timedelta(minutes=12)
+    await db_session.commit()
+
+    resp = await client.get(f"/attendance/{employee_id}/history", headers=hr_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    exit_row = next(i for i in body["items"] if i["event_type"] == "exit")
+    assert exit_row["duration_minutes"] == 12
+    assert exit_row["still_open"] is False
+    return_row = next(i for i in body["items"] if i["event_type"] == "return")
+    assert return_row["duration_minutes"] is None
+    assert return_row["still_open"] is None
+
+
+@pytest.mark.asyncio
+async def test_history_shows_closed_duration_when_checkout_happens_with_no_return(
+    client, db_session, caplog, unique_email
+):
+    """Real production scenario this test guards: an employee exits, never
+    returns, and checks out anyway. The session is CLOSED — must show a real
+    EXIT->checkout duration, not read as still_open=True forever after."""
+    hr_headers, employee_id, attendance_id, geofence_id = await _setup_checked_in_employee(
+        client, db_session, caplog, unique_email
+    )
+    await GeofenceEventRepository(db_session).create(
+        uuid.UUID(employee_id), uuid.UUID(attendance_id), uuid.UUID(geofence_id),
+        GeofenceEventType.EXIT, FAR_LAT, OFFICE_LNG,
+    )
+    await db_session.commit()
+
+    hire_email = f"hire-{unique_email}"
+    employee_access = await login(client, hire_email, password="TempPass123")
+    # Checkout needs a geofence match too (same _match_or_raise as check-in),
+    # so this checks out back inside the zone — matches how a real checkout
+    # after a wander-off actually happens (walked back within range, or the
+    # session simply gets closed while the EXIT is still unresolved).
+    checkout_resp = await client.post(
+        "/attendance/check-out",
+        json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG, "accuracy_meters": 10},
+        headers={"Authorization": f"Bearer {employee_access}"},
+    )
+    assert checkout_resp.status_code == 200, checkout_resp.text
+
+    # Force a known gap between exit and checkout, same reasoning as the
+    # closed-pair test above — repo timestamps both near "now" otherwise.
+    attendance = (
+        await db_session.execute(select(Attendance).where(Attendance.id == uuid.UUID(attendance_id)))
+    ).scalar_one()
+    events = await GeofenceEventRepository(db_session).list_all_for_employee(
+        uuid.UUID(employee_id), None, None, GeofenceEventType.EXIT
+    )
+    exit_event = events[0]
+    attendance.check_out_at = exit_event.created_at + timedelta(minutes=3)
+    await db_session.commit()
+
+    resp = await client.get(f"/attendance/{employee_id}/history", headers=hr_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    exit_row = next(i for i in body["items"] if i["event_type"] == "exit")
+    assert exit_row["duration_minutes"] == 3
+    assert exit_row["still_open"] is False
+
+
+@pytest.mark.asyncio
+async def test_history_shows_still_open_for_exit_with_no_return_yet(
+    client, db_session, caplog, unique_email
+):
+    hr_headers, employee_id, attendance_id, geofence_id = await _setup_checked_in_employee(
+        client, db_session, caplog, unique_email
+    )
+    await GeofenceEventRepository(db_session).create(
+        uuid.UUID(employee_id), uuid.UUID(attendance_id), uuid.UUID(geofence_id),
+        GeofenceEventType.EXIT, FAR_LAT, OFFICE_LNG,
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/attendance/{employee_id}/history", headers=hr_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    exit_row = next(i for i in body["items"] if i["event_type"] == "exit")
+    assert exit_row["duration_minutes"] is None
+    assert exit_row["still_open"] is True
 
 
 @pytest.mark.asyncio

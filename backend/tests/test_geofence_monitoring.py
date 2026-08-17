@@ -301,6 +301,100 @@ async def test_concurrent_break_start_rescued_as_conflict(client, db_session, ca
 
 
 @pytest.mark.asyncio
+async def test_exit_auto_starts_geofence_exit_break(client, db_session, caplog, unique_email):
+    employee_access, _, _ = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+    await _check_in(client, headers)
+
+    for seq in (1, 2, 3):
+        await _ping(client, headers, FAR_LAT, FAR_LNG, seq)
+
+    resp = await client.get("/attendance/me/today", headers=headers)
+    assert resp.status_code == 200, resp.text
+    breaks = resp.json()["current"]["breaks"]
+    assert len(breaks) == 1
+    assert breaks[0]["source"] == "geofence_exit"
+    assert breaks[0]["break_end_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_ping_during_geofence_exit_break_is_not_dropped_and_return_closes_it(
+    client, db_session, caplog, unique_email
+):
+    """Unlike a MANUAL break, an auto-break from a debounced EXIT must not
+    swallow pings — RETURN can only be detected (and the break auto-closed)
+    if position checks keep running while it's open."""
+    employee_access, _, _ = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+    await _check_in(client, headers)
+
+    for seq in (1, 2, 3):
+        await _ping(client, headers, FAR_LAT, FAR_LNG, seq)
+
+    resp = await _ping(client, headers, NEAR_LAT, NEAR_LNG, 4)
+    assert resp.status_code == 200, resp.text
+    # Not "on_break" — proves this ping wasn't dropped by the break gate.
+    assert resp.json()["status"] == "in_zone"
+    assert resp.json()["event_fired"] == "return"
+
+    today = await client.get("/attendance/me/today", headers=headers)
+    breaks = today.json()["current"]["breaks"]
+    assert len(breaks) == 1
+    assert breaks[0]["source"] == "geofence_exit"
+    assert breaks[0]["break_end_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_checkout_auto_closes_open_geofence_exit_break(
+    client, db_session, caplog, unique_email
+):
+    """An employee physically back on-site, checking out before the next
+    ping fires, must not be blocked by (or leave dangling) the still-open
+    auto-break — checkout closes it itself, unlike a MANUAL break which
+    still blocks checkout."""
+    employee_access, _, _ = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+    await _check_in(client, headers)
+
+    for seq in (1, 2, 3):
+        await _ping(client, headers, FAR_LAT, FAR_LNG, seq)
+
+    resp = await client.post(
+        "/attendance/check-out",
+        json={"latitude": OFFICE_LAT, "longitude": OFFICE_LNG, "accuracy_meters": 10},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["check_out_at"] is not None
+    assert len(body["breaks"]) == 1
+    assert body["breaks"][0]["source"] == "geofence_exit"
+    assert body["breaks"][0]["break_end_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_checkout_still_blocked_by_open_manual_break(
+    client, db_session, caplog, unique_email
+):
+    employee_access, _, _ = await _setup_employee_with_geofence(
+        client, db_session, caplog, unique_email
+    )
+    headers = {"Authorization": f"Bearer {employee_access}"}
+    await _check_in(client, headers)
+    on_site = {"latitude": OFFICE_LAT, "longitude": OFFICE_LNG, "accuracy_meters": 10}
+    await client.post("/attendance/break/start", json=on_site, headers=headers)
+
+    resp = await client.post("/attendance/check-out", json=on_site, headers=headers)
+    assert resp.status_code == 409, resp.text
+
+
+@pytest.mark.asyncio
 async def test_concurrent_check_in_rescued_as_conflict(client, db_session, caplog, unique_email):
     """Two near-simultaneous check-in requests for the same employee/day —
     the DB unique constraint (uq_attendance_employee_date) is the real

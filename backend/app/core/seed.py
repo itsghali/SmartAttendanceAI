@@ -41,6 +41,16 @@ PERMISSIONS = {
     "problem_reports:create:own": "Report a problem to HR",
     "problem_reports:read:all": "View employee-submitted problem reports",
     "problem_reports:resolve": "Mark a problem report as resolved",
+    # HR/Admin/SuperAdmin only, deliberately excluding supervisor — see
+    # PLAN.md T4. Granting this to supervisor would be a new instance of the
+    # already-known "supervisor lacks direct-reports-only scoping" gap
+    # (TODOS.md), since these endpoints are workforce-wide, not team-scoped.
+    "workforce_intelligence:read": (
+        "View synthetic-data-generation runs and per-employee/department attendance baselines"
+    ),
+    "workforce_intelligence:write": (
+        "Trigger synthetic-data generation and baseline rebuilds"
+    ),
 }
 
 ROLE_PERMISSIONS: dict[str, list[str]] = {
@@ -59,6 +69,8 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "attendance:correct",
         "problem_reports:read:all",
         "problem_reports:resolve",
+        "workforce_intelligence:read",
+        "workforce_intelligence:write",
     ],
     "hr_manager": [
         "users:read",
@@ -72,6 +84,8 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "attendance:correct",
         "problem_reports:read:all",
         "problem_reports:resolve",
+        "workforce_intelligence:read",
+        "workforce_intelligence:write",
     ],
     "supervisor": [
         "users:read",

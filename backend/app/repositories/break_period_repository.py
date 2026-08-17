@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.break_period import BreakPeriod
+from app.models.break_period import BreakPeriod, BreakSource
 
 
 class BreakPeriodRepository:
@@ -19,9 +19,11 @@ class BreakPeriodRepository:
         longitude: float | None = None,
         accuracy_meters: float | None = None,
         geofence_id: uuid.UUID | None = None,
+        source: BreakSource = BreakSource.MANUAL,
     ) -> BreakPeriod:
         break_period = BreakPeriod(
             attendance_id=attendance_id,
+            source=source,
             break_start_at=break_start_at,
             start_latitude=latitude,
             start_longitude=longitude,

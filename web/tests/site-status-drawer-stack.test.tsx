@@ -19,6 +19,8 @@ function event(overrides: Partial<GeofenceEventSummary>): GeofenceEventSummary {
     geofence_name: "Site A",
     created_at: "2026-08-11T10:00:00Z",
     authorized_radius_meters: 50,
+    duration_minutes: null,
+    still_open: null,
     ...overrides,
   };
 }

@@ -8,6 +8,18 @@ interface SelfieCaptureProps {
   onCancel: () => void;
 }
 
+// expo-camera's web implementation has no raw-base64-only capture mode —
+// canvas.toDataURL() is the only primitive available there, so
+// takePictureAsync({base64:true}) returns a full "data:image/...;base64,<data>"
+// string on web. Native platforms return raw base64 with no prefix. The
+// backend does a strict base64.b64decode(..., validate=True), which rejects
+// the "data:...," prefix outright — strip it here so both platforms send the
+// same shape. No-op when there's no prefix to strip (native).
+export function stripDataUrlPrefix(value: string): string {
+  const commaIndex = value.indexOf(",");
+  return value.startsWith("data:") && commaIndex !== -1 ? value.slice(commaIndex + 1) : value;
+}
+
 /**
  * Full-screen selfie capture, shown before check-in submits when face
  * verification requires a photo. Mirrors the permission-denied surfacing
@@ -79,7 +91,7 @@ export function SelfieCapture({ visible, onCapture, onCancel }: SelfieCapturePro
     try {
       const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.5 });
       if (photo?.base64) {
-        onCapture(photo.base64);
+        onCapture(stripDataUrlPrefix(photo.base64));
       }
     } finally {
       setCapturing(false);

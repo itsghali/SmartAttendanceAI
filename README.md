@@ -106,6 +106,7 @@ Every account below was verified working (`HTTP 200` on `/auth/login`) at the ti
 | `leave@example.com` | `Leave12345` | Employee `status=on_leave`; login still works |
 | `offboard@example.com` | `Offb12345` | Employee `status=terminated`, user deactivated — login returns `403` |
 | `emp-livetest-1785948119@example.com` | `TempPass123` | Has a full ENTER → EXIT → RETURN event history |
+| `autoexit@example.com` | `Autoex12345` | Checked in, geofence EXIT auto-started a break (`source=geofence_exit`, `break_end_at=null`) — left open, never returned |
 
 Attendance state is per-day: `onbreak@` and `closed@` are only in that state for the date they were seeded (`2026-08-06`). Re-run the state commands below to put them back in it today.
 
@@ -177,6 +178,7 @@ mk onbreak@example.com     "Bree Cake"      Break12345  employee
 mk closed@example.com      "Clo Sedshift"   Closed12345 employee
 mk leave@example.com       "Lea Ver"        Leave12345  employee
 mk offboard@example.com    "Off Boarded"    Offb12345   employee
+mk autoexit@example.com    "Auto Exit"      Autoex12345 employee
 ```
 
 #### The attendance states
@@ -193,6 +195,16 @@ POS="{\"latitude\":$AT,\"longitude\":$LNG,\"accuracy_meters\":10}"
 T=$(LOGIN onbreak@example.com Break12345)
 curl -s -X POST $BASE/attendance/check-in    -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$POS" >/dev/null
 curl -s -X POST $BASE/attendance/break/start -H "Authorization: Bearer $T" -H "Content-Type: application/json" -d "$POS"
+
+# autoexit@ — checked in at HQ Live / Live Test Site, EXIT auto-starts a
+# break (source=geofence_exit); left open on purpose, no RETURN sent
+T=$(LOGIN autoexit@example.com Autoex12345)
+curl -s -X POST $BASE/attendance/check-in -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  -d '{"latitude":36.8065,"longitude":10.1815,"accuracy_meters":10}' >/dev/null
+for s in 1 2 3; do
+  curl -s -X POST $BASE/attendance/location-ping -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+    -d "{\"latitude\":36.82,\"longitude\":10.1815,\"accuracy_meters\":10,\"ping_seq\":$s}" >/dev/null
+done
 
 # closed@ — full shift, checked in and back out
 T=$(LOGIN closed@example.com Closed12345)
@@ -225,6 +237,8 @@ done
 ```
 
 Ping 3 returns `{"status":"exited","event_fired":"exit"}`. Reload the app to see the amber banner. Send a ping back inside the zone (`33.5731,-7.5898`) with a higher `ping_seq` to fire `RETURN`. The endpoint is rate-limited to 10 pings/minute per employee.
+
+That same debounced `EXIT` also auto-starts a `BreakPeriod` (`source=geofence_exit`) — unlike a manual break, pings keep being processed while it's open so a `RETURN` can auto-close it; checking out while it's still open closes it too, using the checkout's own position. See `autoexit@example.com` above for a permanently-seeded example, or `TODOS.md` / `AI-CHANGELOG.md` for the design writeup.
 
 ## Why Python 3.11 for backend/ and ai/
 

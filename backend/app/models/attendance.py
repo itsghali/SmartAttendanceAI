@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config.settings import get_settings
 from app.core.database import Base
+from app.models.break_period import BreakSource
 from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin, utcnow
 
 
@@ -79,6 +80,23 @@ class Attendance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     last_ping_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     outside_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # Workforce Intelligence provenance (see PLAN.md T1/T9/T0). is_synthetic
+    # defaults false so every existing row and every future real check-in is
+    # unambiguously real with zero backfill. synthetic_anomaly_type is the
+    # per-row ground-truth label a controlled-anomaly generator writes (e.g.
+    # "late_arrival") — non-null ONLY on rows the generator deliberately made
+    # anomalous, so baseline computation can exclude them (T9) instead of
+    # training "normal" stats on its own injected outliers. Every read path
+    # that feeds an HR-facing view or a check-in-blocking gate (see
+    # attendance_repository.get_last_completed_for_employee, T0) MUST filter
+    # is_synthetic=false — this column existing does not filter anything by
+    # itself.
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    synthetic_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("synthetic_data_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    synthetic_anomaly_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     __table_args__ = (
         # One row is one SITE SESSION (check-in → check-out), not one day. An
         # employee moving between chantiers checks in and out several times a
@@ -99,6 +117,12 @@ class Attendance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             sqlite_where=text("check_out_at IS NULL"),
         ),
         Index("ix_attendance_employee_checkin", "employee_id", "check_in_at"),
+        # Covers T0's is_synthetic=false filter on get_last_completed_for_employee
+        # (the query feeding the check-in-blocking impossible-travel gate) and
+        # every other per-employee real-data read path — this is the hottest
+        # new query pattern Workforce Intelligence introduces.
+        Index("ix_attendance_employee_synthetic", "employee_id", "is_synthetic"),
+        Index("ix_attendance_synthetic_run", "synthetic_run_id"),
     )
 
     employee: Mapped["Employee"] = relationship()  # noqa: F821
@@ -130,10 +154,15 @@ class Attendance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             return None
         if self.check_in_geofence_id is None:
             return "not_monitored"
-        if any(b.break_end_at is None for b in self.breaks):
-            # Pings are intentionally paused for the duration of a break (see
-            # monitoring_service.record_ping) — that gap must never read as
-            # staleness.
+        if any(
+            b.break_end_at is None and b.source == BreakSource.MANUAL for b in self.breaks
+        ):
+            # Pings are intentionally paused for the duration of a MANUAL
+            # break (see monitoring_service.record_ping) — that gap must
+            # never read as staleness. A GEOFENCE_EXIT auto-break is the
+            # opposite: pings keep flowing so RETURN can close it, so it
+            # falls through to the ordinary live/stale check below instead
+            # of masking a real dead-device gap as "on_break".
             return "on_break"
         # 3x the ping interval mirrors the exit-debounce margin elsewhere in
         # this module — one or two missed pings is normal jitter, not a dead

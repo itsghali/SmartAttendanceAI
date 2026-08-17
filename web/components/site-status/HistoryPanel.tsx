@@ -7,6 +7,7 @@ import {
   getEmployeeFaceAttempts,
   getEmployeeGeofenceHistory,
 } from "../../lib/siteStatusService";
+import { formatExitDuration } from "./exitDuration";
 import { useFocusTrap } from "./useFocusTrap";
 
 const HISTORY_PAGE_SIZE = 50;
@@ -26,6 +27,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   check_in: "Checked in",
   check_out: "Checked out",
 };
+
+// Minutes-granularity figure, not a stopwatch — once a minute is plenty to
+// keep an open exit's displayed duration current while the panel is open.
+const LIVE_TICK_INTERVAL_MS = 60_000;
 
 const FAILURE_REASON_LABELS: Record<string, string> = {
   no_face: "No face detected",
@@ -179,8 +184,16 @@ export default function HistoryPanel({
   const [dateTo, setDateTo] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const containerRef = useRef<HTMLDivElement>(null);
   useFocusTrap(true, containerRef, onClose);
+
+  // Pure client clock — ticks the displayed duration on still-open exits
+  // without re-fetching from the server.
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), LIVE_TICK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   const load = useCallback(
     async (nextOffset: number) => {
@@ -313,6 +326,7 @@ export default function HistoryPanel({
               : event.event_type === "return"
                 ? "bg-blue-500"
                 : "bg-green-500";
+          const durationText = formatExitDuration(event, nowMs);
           return (
             <li key={event.id}>
               {showDateDivider && (
@@ -336,6 +350,17 @@ export default function HistoryPanel({
                     }`}
                   >
                     {EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}
+                    {durationText && (
+                      <span
+                        className={
+                          event.still_open
+                            ? "ml-1.5 font-normal text-red-600 dark:text-red-400"
+                            : "ml-1.5 font-normal text-zinc-500"
+                        }
+                      >
+                        — {durationText}
+                      </span>
+                    )}
                   </span>
                   <span className="text-xs text-zinc-500">{event.geofence_name}</span>
                 </span>

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import get_settings
 from app.core.geo import Coordinates, haversine_distance_meters, is_within_polygon
+from app.models.break_period import BreakSource
 from app.models.employee import Employee
 from app.models.geofence import GeofenceBoundaryType
 from app.models.geofence_event import GeofenceEventType
@@ -62,14 +63,22 @@ class MonitoringService:
             logger.info("ping dropped: no open attendance for employee=%s", employee.id)
             return PingResult(status="no_active_checkin", event_fired=None, next_seq=None)
 
-        if await self._breaks.get_open_for_attendance(attendance.id) is not None:
+        open_break = await self._breaks.get_open_for_attendance(attendance.id)
+        if open_break is not None and open_break.source == BreakSource.MANUAL:
             # CNIL doctrine bars location tracking during legally-protected rest
             # time. The mobile client already stops sending pings on a break —
             # this is the server-side backstop for an old/buggy/tampered client
             # that sends one anyway. Nothing is persisted: no coordinates, no
             # ping_seq, no debounce state — a break-time ping leaves no trace.
+            #
+            # A GEOFENCE_EXIT break is different: it's not employee-initiated
+            # rest time, it's the system's own record of the employee being
+            # outside the site, auto-opened by this same method's EXIT branch
+            # below. Dropping pings here would mean the RETURN that's supposed
+            # to close it could never be detected — so those pings fall
+            # through to the normal position check instead.
             logger.info(
-                "ping dropped: open break for attendance=%s (buggy/tampered client?)",
+                "ping dropped: open manual break for attendance=%s (buggy/tampered client?)",
                 attendance.id,
             )
             return PingResult(status="on_break", event_fired=None, next_seq=attendance.last_ping_seq)
@@ -136,6 +145,10 @@ class MonitoringService:
                     employee.id, attendance.id, geofence.id, GeofenceEventType.RETURN, latitude, longitude
                 )
                 event_fired = GeofenceEventType.RETURN
+                if open_break is not None and open_break.source == BreakSource.GEOFENCE_EXIT:
+                    await self._breaks.end(
+                        open_break, utcnow(), latitude, longitude, accuracy_meters, geofence.id
+                    )
         else:
             new_streak = attendance.outside_streak + 1
             if new_streak >= self._settings.geofence_exit_debounce_count and not currently_exited:
@@ -143,6 +156,18 @@ class MonitoringService:
                     employee.id, attendance.id, geofence.id, GeofenceEventType.EXIT, latitude, longitude
                 )
                 event_fired = GeofenceEventType.EXIT
+                # currently_exited was False and the only way to reach this
+                # branch is past the MANUAL-break drop above, so no break can
+                # already be open here — this is always a fresh auto-break.
+                await self._breaks.start(
+                    attendance.id,
+                    utcnow(),
+                    latitude,
+                    longitude,
+                    accuracy_meters,
+                    geofence.id,
+                    source=BreakSource.GEOFENCE_EXIT,
+                )
 
         await self._attendance.record_ping(attendance, ping_seq, utcnow(), new_streak)
 

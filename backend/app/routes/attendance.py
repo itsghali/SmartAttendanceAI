@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from redis.asyncio import Redis
@@ -32,7 +32,8 @@ from app.core.exceptions import (
 )
 from app.core.rate_limit import RateLimiter, get_redis_client
 from app.models.geofence import Geofence
-from app.models.geofence_event import GeofenceEventType
+from app.models.geofence_event import GeofenceEvent, GeofenceEventType
+from app.models.mixins import ensure_aware
 from app.models.user import User
 from app.repositories.attendance_repository import AttendanceRepository
 from app.repositories.geofence_event_repository import GeofenceEventRepository
@@ -351,6 +352,56 @@ async def list_all_attendance(
     )
 
 
+def _pair_exit_durations(
+    events: list[GeofenceEvent],
+    checkout_at_by_attendance: dict[uuid.UUID, datetime | None],
+) -> dict[uuid.UUID, tuple[int | None, bool]]:
+    """Pairs each EXIT with the next RETURN in the same attendance session.
+
+    Scoped by attendance_id so an EXIT never pairs with a RETURN from a
+    different check-in session, even same-day. events may be in any order
+    (list_all_for_employee returns created_at.desc()) — grouped and
+    re-sorted ascending internally. Returns event.id -> (duration_minutes,
+    still_open), populated for EXIT events only.
+
+    An EXIT with no RETURN can mean two different things, not one: the
+    employee is genuinely still outside (still_open=True), OR they checked
+    out while outside and never came back (a real, CLOSED duration — the
+    session ended, so it can't still be "open"). checkout_at_by_attendance
+    disambiguates: if the attendance closed after this EXIT with no RETURN
+    in between, the duration is EXIT -> checkout, not "still open" forever.
+    """
+    by_attendance: dict[uuid.UUID, list[GeofenceEvent]] = {}
+    for event in events:
+        by_attendance.setdefault(event.attendance_id, []).append(event)
+
+    durations: dict[uuid.UUID, tuple[int | None, bool]] = {}
+    for attendance_id, group in by_attendance.items():
+        # ensure_aware: SQLite drops tzinfo on read-back even for
+        # DateTime(timezone=True) columns, so a freshly-queried row can come
+        # back naive while an in-memory-default row stays aware — mixing
+        # the two raises on both sort and subtraction.
+        ordered = sorted(group, key=lambda e: ensure_aware(e.created_at))
+        checkout_at = checkout_at_by_attendance.get(attendance_id)
+        for i, event in enumerate(ordered):
+            if event.event_type != GeofenceEventType.EXIT:
+                continue
+            exit_at = ensure_aware(event.created_at)
+            matched_return = next(
+                (e for e in ordered[i + 1 :] if e.event_type == GeofenceEventType.RETURN),
+                None,
+            )
+            if matched_return is not None:
+                delta = ensure_aware(matched_return.created_at) - exit_at
+                durations[event.id] = (round(delta.total_seconds() / 60), False)
+            elif checkout_at is not None and ensure_aware(checkout_at) > exit_at:
+                delta = ensure_aware(checkout_at) - exit_at
+                durations[event.id] = (round(delta.total_seconds() / 60), False)
+            else:
+                durations[event.id] = (None, True)
+    return durations
+
+
 def _geofence_label(geofence: Geofence | None, is_manual_entry: bool) -> str:
     # A normal self-service check-in always requires an active geofence
     # match (NoActiveGeofenceError otherwise) — same for the geofence_events
@@ -416,16 +467,38 @@ async def get_employee_geofence_history(
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_db),
 ) -> GeofenceEventHistoryOut:
-    events = await GeofenceEventRepository(session).list_all_for_employee(
-        employee_id, date_from, date_to, event_type
+    # Fetched unconditionally (not gated on event_type is None) — pairing
+    # needs check_out_at to distinguish "still genuinely outside" from
+    # "checked out while outside and never returned" regardless of what the
+    # caller's event_type filter narrows the DISPLAYED rows to. Also reused
+    # below for the check-in/check-out merge when event_type is None.
+    sessions = await AttendanceRepository(session).list_all_for_employee(
+        employee_id, date_from, date_to
+    )
+    checkout_at_by_attendance = {a.id: a.check_out_at for a in sessions}
+
+    # Fetched unfiltered by event_type (regardless of the caller's filter) so
+    # pairing always has both halves of an EXIT/RETURN pair available — a
+    # request scoped to event_type=exit must not misreport a closed exit as
+    # still_open just because its RETURN got excluded from the fetch.
+    all_events = await GeofenceEventRepository(session).list_all_for_employee(
+        employee_id, date_from, date_to, None
+    )
+    exit_durations = _pair_exit_durations(all_events, checkout_at_by_attendance)
+    events = (
+        all_events
+        if event_type is None
+        else [e for e in all_events if e.event_type == event_type]
     )
     entries = [
         GeofenceEventSummaryOut(
             id=str(event.id),
             event_type=event.event_type.value,
             geofence_name=_geofence_label(event.geofence, is_manual_entry=False),
-            created_at=event.created_at,
+            created_at=ensure_aware(event.created_at),
             authorized_radius_meters=event.geofence.radius_meters if event.geofence else None,
+            duration_minutes=exit_durations.get(event.id, (None, False))[0],
+            still_open=exit_durations.get(event.id, (None, False))[1] if event.id in exit_durations else None,
         )
         for event in events
     ]
@@ -436,9 +509,6 @@ async def get_employee_geofence_history(
     # check_in/check_out aren't ENTER/EXIT/RETURN and a filtered request is
     # explicitly asking for geofence events only.
     if event_type is None:
-        sessions = await AttendanceRepository(session).list_all_for_employee(
-            employee_id, date_from, date_to
-        )
         for attendance in sessions:
             entries.append(
                 GeofenceEventSummaryOut(
@@ -447,7 +517,7 @@ async def get_employee_geofence_history(
                     geofence_name=_geofence_label(
                         attendance.check_in_geofence, attendance.is_manual_entry
                     ),
-                    created_at=attendance.check_in_at,
+                    created_at=ensure_aware(attendance.check_in_at),
                     authorized_radius_meters=(
                         attendance.check_in_geofence.radius_meters
                         if attendance.check_in_geofence
@@ -463,7 +533,7 @@ async def get_employee_geofence_history(
                         geofence_name=_geofence_label(
                             attendance.check_out_geofence, attendance.is_manual_entry
                         ),
-                        created_at=attendance.check_out_at,
+                        created_at=ensure_aware(attendance.check_out_at),
                         authorized_radius_meters=(
                             attendance.check_out_geofence.radius_meters
                             if attendance.check_out_geofence

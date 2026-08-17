@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.models.attendance import AttendanceStatus
+from app.models.break_period import BreakSource
 from app.models.geofence_event import GeofenceEventType
 
 
@@ -65,6 +66,7 @@ class LocationPingResponse(BaseModel):
 
 class BreakPeriodOut(BaseModel):
     id: uuid.UUID
+    source: BreakSource
     break_start_at: datetime
     break_end_at: datetime | None
 
@@ -169,6 +171,11 @@ class GeofenceEventSummaryOut(BaseModel):
     # read a radius from (deleted/not-monitored), same nullability pattern
     # as geofence_name's fallback labels.
     authorized_radius_meters: float | None = None
+    # Populated only on event_type == "exit" rows, paired against the next
+    # RETURN in the same attendance_id (see get_employee_geofence_history).
+    # Both null on every other row type.
+    duration_minutes: int | None = None
+    still_open: bool | None = None
 
 
 class GeofenceEventHistoryOut(BaseModel):

@@ -49,6 +49,12 @@ export interface GeofenceEventSummary {
   // radius from (deleted / not-monitored), same nullability as geofence_name's
   // fallback labels imply.
   authorized_radius_meters: number | null;
+  // Populated only on event_type === "exit" rows, paired server-side
+  // against the next RETURN in the same attendance session — null on
+  // every other row type.
+  duration_minutes: number | null;
+  // true when this EXIT has no RETURN yet in its attendance session.
+  still_open: boolean | null;
 }
 
 export interface GeofenceEventHistory {
