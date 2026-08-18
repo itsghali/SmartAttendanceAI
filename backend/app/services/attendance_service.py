@@ -41,6 +41,9 @@ from app.repositories.break_period_repository import BreakPeriodRepository
 from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.geofence_event_repository import GeofenceEventRepository
 from app.repositories.geofence_repository import GeofenceRepository
+from app.repositories.impossible_travel_rejection_repository import (
+    ImpossibleTravelRejectionRepository,
+)
 from app.services.face_service import FaceService
 
 # Same in-process import technique face_service.py already uses for ai/
@@ -59,11 +62,13 @@ logger = logging.getLogger("app.attendance")
 
 class AttendanceService:
     def __init__(self, session: AsyncSession):
+        self._session = session
         self._employees = EmployeeRepository(session)
         self._geofences = GeofenceRepository(session)
         self._attendance = AttendanceRepository(session)
         self._breaks = BreakPeriodRepository(session)
         self._geofence_events = GeofenceEventRepository(session)
+        self._impossible_travel_rejections = ImpossibleTravelRejectionRepository(session)
         self._face = FaceService(session)
         self._settings = get_settings()
 
@@ -142,6 +147,36 @@ class AttendanceService:
             distance_km, elapsed_hours, self._settings.impossible_travel_max_speed_kmh
         )
         if risk > 0.0:
+            # PLAN.md Module 3 / Candidate 6: this gate has always been a
+            # hard block, but until now the rejection itself left zero DB
+            # trace. Persist the audit row and commit it in its OWN small
+            # transaction, BEFORE raising — get_db() rolls back the entire
+            # request's session on the exception this raise triggers, which
+            # would silently wipe the audit row too if it weren't committed
+            # independently first (same "small independent commit" pattern
+            # WorkforceIntelligenceService uses for SyntheticDataRun status
+            # transitions). If the commit itself fails (e.g. a DB blip), the
+            # check-in must still be rejected — the audit trail is evidence
+            # for later review, never a precondition for the security gate
+            # holding. Log and continue to the raise either way.
+            try:
+                await self._impossible_travel_rejections.create(
+                    employee_id=employee.id,
+                    prior_attendance_id=last.id,
+                    attempted_at=check_in_at,
+                    distance_km=distance_km,
+                    elapsed_hours=elapsed_hours,
+                    implied_speed_kmh=distance_km / elapsed_hours,
+                    risk_score=risk,
+                )
+                await self._session.commit()
+            except Exception:
+                logger.exception(
+                    "failed to persist impossible-travel rejection audit row "
+                    "(employee=%s) — check-in is still being rejected",
+                    employee.id,
+                )
+                await self._session.rollback()
             raise ImpossibleTravelError(
                 f"check-in implies {distance_km:.1f}km in {elapsed_hours:.2f}h since your last "
                 "check-out — that speed isn't physically plausible"

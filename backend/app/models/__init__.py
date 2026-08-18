@@ -4,6 +4,7 @@ from app.models.department import Department
 from app.models.device import Device
 from app.models.employee import Employee, EmployeeStatus
 from app.models.employee_baseline import EmployeeBaseline
+from app.models.employee_deviation_flag import DeviationSeverity, EmployeeDeviationFlag
 from app.models.employee_geofence import EmployeeGeofence
 from app.models.face_profile import FaceProfile
 from app.models.face_verification_attempt import (
@@ -12,6 +13,7 @@ from app.models.face_verification_attempt import (
 )
 from app.models.geofence import Geofence, GeofenceBoundaryType
 from app.models.geofence_event import GeofenceEvent, GeofenceEventType
+from app.models.impossible_travel_rejection import ImpossibleTravelRejection
 from app.models.otp import OTPCode, OTPPurpose
 from app.models.problem_report import ProblemReport, ProblemReportStatus
 from app.models.refresh_token import RefreshToken
@@ -24,9 +26,11 @@ __all__ = [
     "AttendanceStatus",
     "BreakPeriod",
     "Department",
+    "DeviationSeverity",
     "Device",
     "Employee",
     "EmployeeBaseline",
+    "EmployeeDeviationFlag",
     "EmployeeGeofence",
     "EmployeeStatus",
     "FaceProfile",
@@ -36,6 +40,7 @@ __all__ = [
     "GeofenceBoundaryType",
     "GeofenceEvent",
     "GeofenceEventType",
+    "ImpossibleTravelRejection",
     "OTPCode",
     "OTPPurpose",
     "ProblemReport",

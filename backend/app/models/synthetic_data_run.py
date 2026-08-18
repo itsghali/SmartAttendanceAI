@@ -29,6 +29,11 @@ class SyntheticDataRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     requested_by: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # T10: client-supplied idempotency key. Unique when provided (multiple
+    # NULLs are allowed by a standard unique index/constraint), so a
+    # retried/double-fired generation request with the same key reuses the
+    # existing run instead of writing a duplicate corpus.
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     employee_scope: Mapped[list] = mapped_column(JSON, nullable=False)
     date_range_start: Mapped[date] = mapped_column(Date, nullable=False)
     date_range_end: Mapped[date] = mapped_column(Date, nullable=False)

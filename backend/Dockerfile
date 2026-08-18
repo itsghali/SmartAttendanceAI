@@ -1,7 +1,8 @@
 # Build context is the repo root (see docker-compose.yml) so this image can
-# also carry ai/face_recognition/ and ai/fraud_detection/ — both imported
-# in-process at runtime (face_service.py, attendance_service.py) and need to
-# be siblings of backend/, same layout as the local dev checkout.
+# also carry ai/face_recognition/, ai/fraud_detection/, and
+# ai/workforce_intelligence/ — all imported in-process at runtime
+# (face_service.py, attendance_service.py, workforce_intelligence_service.py)
+# and need to be siblings of backend/, same layout as the local dev checkout.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -20,6 +21,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY ai/face_recognition/ ai/face_recognition/
 COPY ai/fraud_detection/ ai/fraud_detection/
+COPY ai/workforce_intelligence/ ai/workforce_intelligence/
 # alembic.ini + migrations live outside backend/ but ship in the same image so
 # a platform preDeployCommand can run `alembic upgrade head` against them.
 COPY database/ database/

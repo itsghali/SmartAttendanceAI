@@ -66,6 +66,14 @@ class AttendanceRecord:
     # (excessive_geofence_exits) — governs the geofence_exit_count metric
     # only, independent of synthetic_anomaly_type on the session itself.
     geofence_exit_count_anomalous: bool = False
+    # Provenance passthrough for Module 3 (detection/detector.py) — the
+    # baseline builder itself never filters on this (see module docstring),
+    # it just needs to carry the flag so a detector-produced
+    # EmployeeDeviationFlag can be tagged is_synthetic/synthetic_run_id too
+    # (PLAN.md T0/T1 precedent applied to Module 3's own output table).
+    is_synthetic: bool = False
+    synthetic_run_id: uuid.UUID | None = None
+    attendance_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -92,7 +100,14 @@ class PeerGroupBaseline:
     metrics: dict[str, MetricStats]
 
 
-def _minutes_of_day(dt: datetime) -> float:
+# Public (not module-private): ai/workforce_intelligence/detection/detector.py
+# reuses this exact formula so a session's checkin_time_of_day_minutes is
+# computed identically whether it's feeding the baseline or being scored
+# against one — the whole-second truncation (dt.second, not
+# dt.microsecond-precise) is a real, if immaterial, quirk of this formula
+# (see AI-CHANGELOG.md's Sprint 6 spot-check entry) and must stay identical
+# on both sides, not silently drift if duplicated.
+def minutes_of_day(dt: datetime) -> float:
     return dt.hour * 60 + dt.minute + dt.second / 60
 
 
@@ -118,7 +133,7 @@ def compute_metrics(sessions: list[AttendanceRecord]) -> dict[str, MetricStats]:
     for s in sessions:
         session_clean = s.synthetic_anomaly_type is None
         if session_clean:
-            checkin_minutes.append(_minutes_of_day(s.check_in_at))
+            checkin_minutes.append(minutes_of_day(s.check_in_at))
             if s.check_out_at is not None:
                 work_minutes.append((s.check_out_at - s.check_in_at).total_seconds() / 60)
             break_counts.append(float(len(s.breaks)))

@@ -52,3 +52,4 @@ Thumbs.db
 *.md
 *.claude
 .vercel
+.gstack/

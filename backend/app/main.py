@@ -16,6 +16,7 @@ from app.routes import (
     health,
     problem_reports,
     sessions,
+    workforce_intelligence,
 )
 
 configure_logging()
@@ -93,3 +94,4 @@ app.include_router(geofences.router)
 app.include_router(attendance.router)
 app.include_router(face.router)
 app.include_router(problem_reports.router)
+app.include_router(workforce_intelligence.router)

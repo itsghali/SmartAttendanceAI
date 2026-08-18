@@ -28,20 +28,27 @@ import uuid
 from datetime import date
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.attendance import Attendance, AttendanceStatus
 from app.models.break_period import BreakSource
 from app.models.employee import EmployeeStatus
+from app.models.employee_baseline import EmployeeBaseline
+from app.models.employee_deviation_flag import DeviationSeverity
 from app.models.geofence_event import GeofenceEventType
 from app.models.mixins import utcnow
 from app.models.synthetic_data_run import SyntheticDataRun, SyntheticDataRunStatus
 from app.repositories.attendance_repository import AttendanceRepository
 from app.repositories.break_period_repository import BreakPeriodRepository
 from app.repositories.employee_baseline_repository import EmployeeBaselineRepository
+from app.repositories.employee_deviation_flag_repository import EmployeeDeviationFlagRepository
 from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.geofence_event_repository import GeofenceEventRepository
 from app.repositories.geofence_repository import GeofenceRepository
+from app.repositories.impossible_travel_rejection_repository import (
+    ImpossibleTravelRejectionRepository,
+)
 from app.repositories.synthetic_data_run_repository import SyntheticDataRunRepository
 
 _AI_DIR = Path(__file__).resolve().parents[3] / "ai"
@@ -49,8 +56,10 @@ if str(_AI_DIR) not in sys.path:
     sys.path.insert(0, str(_AI_DIR))
 
 from workforce_intelligence.baseline import builder as baseline_builder  # noqa: E402
+from workforce_intelligence.detection import detector  # noqa: E402
 from workforce_intelligence.exceptions import (  # noqa: E402
     BaselineConfigError,
+    DetectionConfigError,
     InsufficientHistoryError,
     SyntheticConfigError,
 )
@@ -62,7 +71,14 @@ logger = logging.getLogger("app.workforce_intelligence")
 class SyntheticGenerationError(Exception):
     """Raised after a SyntheticDataRun has already been recorded FAILED
     (PLAN.md T2) — the run row's error_message carries the real detail; this
-    is just the signal to the caller that the request did not complete."""
+    is just the signal to the caller that the request did not complete.
+    Carries the FAILED run itself (not just its message) so a route-layer
+    caller can still return the run's id/status to the client rather than
+    losing that context behind a bare exception."""
+
+    def __init__(self, message: str, run: SyntheticDataRun):
+        super().__init__(message)
+        self.run = run
 
 
 def _to_attendance_record(a: Attendance) -> baseline_builder.AttendanceRecord:
@@ -90,6 +106,9 @@ def _to_attendance_record(a: Attendance) -> baseline_builder.AttendanceRecord:
         breaks=breaks,
         geofence_exit_count=sum(1 for e in a.geofence_events if e.event_type == GeofenceEventType.EXIT),
         geofence_exit_count_anomalous=any(e.synthetic_anomaly_type is not None for e in exit_or_return),
+        is_synthetic=a.is_synthetic,
+        synthetic_run_id=a.synthetic_run_id,
+        attendance_id=a.id,
     )
 
 
@@ -103,6 +122,8 @@ class WorkforceIntelligenceService:
         self._geofence_events = GeofenceEventRepository(session)
         self._runs = SyntheticDataRunRepository(session)
         self._baselines = EmployeeBaselineRepository(session)
+        self._deviation_flags = EmployeeDeviationFlagRepository(session)
+        self._rejections = ImpossibleTravelRejectionRepository(session)
 
     async def _resolve_profile(
         self, employee_id: uuid.UUID
@@ -208,11 +229,22 @@ class WorkforceIntelligenceService:
         date_range_end: date,
         anomaly_config: dict,
         seed: int,
+        idempotency_key: str | None = None,
     ) -> SyntheticDataRun:
         if not employee_ids:
             raise SyntheticConfigError("employee_scope must not be empty")
         if date_range_end < date_range_start:
             raise SyntheticConfigError("date_range_end must not precede date_range_start")
+
+        # T10: a client-supplied idempotency key short-circuits to the
+        # existing run (whatever its outcome) instead of regenerating —
+        # a retried/double-fired request with the same key never produces a
+        # second corpus.
+        if idempotency_key is not None:
+            existing = await self._runs.get_by_idempotency_key(idempotency_key)
+            if existing is not None:
+                return existing
+
         # Fail fast on a bad request BEFORE creating a run row — a rejected
         # request should never leave a wasted FAILED row behind.
         config = synthetic_generator.AnomalyConfig.from_dict(anomaly_config)
@@ -234,13 +266,24 @@ class WorkforceIntelligenceService:
         # so status transitions are committed as their own small
         # transactions; only the row-generation batch itself is wrapped in a
         # SAVEPOINT (below) so partial rows never survive a mid-batch error.
-        run = await self._runs.create(
-            requested_by=requested_by,
-            employee_scope=[str(e) for e in employee_ids],
-            date_range_start=date_range_start,
-            date_range_end=date_range_end,
-            anomaly_config=anomaly_config,
-        )
+        try:
+            run = await self._runs.create(
+                requested_by=requested_by,
+                employee_scope=[str(e) for e in employee_ids],
+                date_range_start=date_range_start,
+                date_range_end=date_range_end,
+                anomaly_config=anomaly_config,
+                idempotency_key=idempotency_key,
+            )
+        except IntegrityError:
+            # Race: two concurrent requests both passed the pre-check above
+            # with the same idempotency_key. Whichever loses the unique-
+            # constraint race reuses the winner's run instead of erroring.
+            await self._session.rollback()
+            assert idempotency_key is not None  # only a key collision raises this
+            winner = await self._runs.get_by_idempotency_key(idempotency_key)
+            assert winner is not None
+            return winner
         await self._runs.set_status(run, SyntheticDataRunStatus.RUNNING)
         await self._session.commit()
 
@@ -270,9 +313,15 @@ class WorkforceIntelligenceService:
                 run, SyntheticDataRunStatus.FAILED, error_message=str(exc)[:1000]
             )
             await self._session.commit()
-            raise SyntheticGenerationError(str(exc)) from exc
+            raise SyntheticGenerationError(str(exc), run=run) from exc
 
         return run
+
+    async def get_synthetic_run(self, run_id: uuid.UUID) -> SyntheticDataRun | None:
+        return await self._runs.get_by_id(run_id)
+
+    async def get_baseline(self, employee_id: uuid.UUID) -> EmployeeBaseline | None:
+        return await self._baselines.get_by_employee_id(employee_id)
 
     async def rebuild_baselines(
         self,
@@ -360,3 +409,138 @@ class WorkforceIntelligenceService:
             "skipped_insufficient_history": skipped_insufficient_history,
             "skipped_terminated": skipped_terminated,
         }
+
+    async def run_detection(
+        self,
+        *,
+        employee_ids: list[uuid.UUID],
+        window_start: date,
+        window_end: date,
+    ) -> dict:
+        """Module 3. Scores each requested employee's sessions in
+        [window_start, window_end] against their EXISTING EmployeeBaseline
+        (built separately by rebuild_baselines) — detection does not build
+        or require a baseline whose own window matches this one; scoring a
+        more recent window against an older baseline is the
+        production-realistic case, this pass's fixture-validation tests
+        happen to use the same window for both. An employee with no
+        baseline yet is skipped, not an error — same "per-employee skip,
+        not whole-batch abort" posture as skipped_insufficient_history in
+        rebuild_baselines above.
+
+        Flushes only (no run-tracking row, no FAILED-status durability
+        problem) — same convention as rebuild_baselines: each employee's
+        flag-set replacement is independent, a per-employee failure doesn't
+        need a SAVEPOINT/rollback story."""
+        if not employee_ids:
+            raise DetectionConfigError("employee_scope must not be empty")
+        if window_end < window_start:
+            raise DetectionConfigError("window_end must not precede window_start")
+
+        targets = await self._employees.list_by_ids(employee_ids)
+        found_ids = {e.id for e in targets}
+        missing = [str(eid) for eid in employee_ids if eid not in found_ids]
+        if missing:
+            raise DetectionConfigError(f"unknown employee_id(s): {', '.join(missing)}")
+
+        attendances = await self._attendance.list_for_baseline_including_synthetic(
+            [e.id for e in targets], window_start, window_end
+        )
+        sessions_by_employee: dict[uuid.UUID, list[baseline_builder.AttendanceRecord]] = {
+            e.id: [] for e in targets
+        }
+        for a in attendances:
+            sessions_by_employee[a.employee_id].append(_to_attendance_record(a))
+
+        scored: list[uuid.UUID] = []
+        skipped_no_baseline: list[uuid.UUID] = []
+        flag_counts: dict[str, int] = {}
+        detected_at = utcnow()
+
+        for e in targets:
+            baseline = await self._baselines.get_by_employee_id(e.id)
+            if baseline is None:
+                skipped_no_baseline.append(e.id)
+                continue
+
+            self_metrics = {
+                metric: baseline_builder.MetricStats(**baseline.metric_stats[metric]["self"])
+                for metric in baseline_builder.METRICS
+            }
+            # peer's stored shape carries extra "source"/"department_id"
+            # keys (see to_metric_stats_json) that MetricStats doesn't
+            # accept — pull only the 3 stat fields, not **-unpack the dict.
+            peer_metrics = {
+                metric: baseline_builder.MetricStats(
+                    mean=baseline.metric_stats[metric]["peer"]["mean"],
+                    std=baseline.metric_stats[metric]["peer"]["std"],
+                    n=baseline.metric_stats[metric]["peer"]["n"],
+                )
+                for metric in baseline_builder.METRICS
+            }
+
+            flags = detector.detect_for_employee(
+                sessions_by_employee[e.id], self_metrics, peer_metrics
+            )
+
+            # Idempotent rebuild semantics: a re-run for this exact
+            # (employee, window) replaces its own prior flags rather than
+            # accumulating duplicates on every trigger.
+            await self._deviation_flags.delete_for_employee_window(e.id, window_start, window_end)
+            if flags:
+                rows = [
+                    {
+                        "employee_id": f.employee_id,
+                        "attendance_id": f.attendance_id,
+                        "metric": f.metric,
+                        "occurred_at": f.occurred_at,
+                        "observed_value": f.observed_value,
+                        "self_mean": f.self_mean,
+                        "self_std": f.self_std,
+                        "self_z": f.self_z,
+                        "peer_mean": f.peer_mean,
+                        "peer_std": f.peer_std,
+                        "peer_z": f.peer_z,
+                        "severity": DeviationSeverity(f.severity),
+                        "window_start": window_start,
+                        "window_end": window_end,
+                        "detected_at": detected_at,
+                        "is_synthetic": f.is_synthetic,
+                        "synthetic_run_id": f.synthetic_run_id,
+                        "synthetic_anomaly_type": f.synthetic_anomaly_type,
+                    }
+                    for f in flags
+                ]
+                await self._deviation_flags.bulk_create(rows)
+            scored.append(e.id)
+            flag_counts[str(e.id)] = len(flags)
+
+        return {
+            "scored": scored,
+            "skipped_no_baseline": skipped_no_baseline,
+            "flag_counts": flag_counts,
+        }
+
+    async def list_deviation_flags(
+        self,
+        employee_id: uuid.UUID | None,
+        window_start: date | None,
+        window_end: date | None,
+        limit: int,
+        offset: int,
+    ):
+        return await self._deviation_flags.list_paginated(
+            employee_id, window_start, window_end, limit, offset
+        )
+
+    async def list_impossible_travel_rejections(
+        self,
+        employee_id: uuid.UUID | None,
+        date_from: date | None,
+        date_to: date | None,
+        limit: int,
+        offset: int,
+    ):
+        return await self._rejections.list_paginated(
+            employee_id, date_from, date_to, limit, offset
+        )

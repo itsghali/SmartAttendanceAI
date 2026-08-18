@@ -18,6 +18,7 @@ class SyntheticDataRunRepository:
         date_range_start: date,
         date_range_end: date,
         anomaly_config: dict,
+        idempotency_key: str | None = None,
     ) -> SyntheticDataRun:
         run = SyntheticDataRun(
             requested_by=requested_by,
@@ -25,6 +26,7 @@ class SyntheticDataRunRepository:
             date_range_start=date_range_start,
             date_range_end=date_range_end,
             anomaly_config=anomaly_config,
+            idempotency_key=idempotency_key,
         )
         self._session.add(run)
         await self._session.flush()
@@ -32,6 +34,13 @@ class SyntheticDataRunRepository:
 
     async def get_by_id(self, run_id: uuid.UUID) -> SyntheticDataRun | None:
         stmt = select(SyntheticDataRun).where(SyntheticDataRun.id == run_id)
+        result = await self._session.execute(stmt)
+        return result.scalars().first()
+
+    async def get_by_idempotency_key(self, idempotency_key: str) -> SyntheticDataRun | None:
+        stmt = select(SyntheticDataRun).where(
+            SyntheticDataRun.idempotency_key == idempotency_key
+        )
         result = await self._session.execute(stmt)
         return result.scalars().first()
 

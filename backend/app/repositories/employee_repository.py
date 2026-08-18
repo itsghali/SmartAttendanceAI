@@ -68,6 +68,17 @@ class EmployeeRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_all_active_or_on_leave(self) -> list[Employee]:
+        """Lean, no-eager-load fetch (T7) of the whole peer-group-eligible
+        workforce (ACTIVE + ON_LEAVE, excludes TERMINATED) — used by baseline
+        rebuild to assemble department/company-wide peer pools independent
+        of whichever employee_ids a given rebuild call targets."""
+        stmt = select(Employee).where(
+            Employee.status.in_((EmployeeStatus.ACTIVE, EmployeeStatus.ON_LEAVE))
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def count_all(self) -> int:
         stmt = select(func.count()).select_from(Employee)
         return (await self._session.execute(stmt)).scalar_one()

@@ -25,3 +25,8 @@ class InsufficientHistoryError(WorkforceIntelligenceError):
     history window — build_for_employee refuses rather than writing a
     baseline computed from noise. Not fatal to a rebuild run: the caller
     catches this per-employee and skips, it does not abort the whole batch."""
+
+
+class DetectionConfigError(WorkforceIntelligenceError):
+    """Detection-run request itself is invalid (empty scope, inverted
+    window) — raised before any EmployeeDeviationFlag row is touched."""
