@@ -42,4 +42,4 @@ EXPOSE 8000
 # stdout/stderr in either the dashboard or CLI). Folding it into CMD means
 # a migration failure shows up in ordinary deploy logs, which are captured.
 # Shell form (not exec/JSON-array) so $PORT actually expands.
-CMD cd /app/database && alembic upgrade head && cd /app/backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD cd /app/database && alembic upgrade head && cd /app/backend && python -m scripts.seed_rbac && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
