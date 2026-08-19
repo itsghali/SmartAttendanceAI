@@ -1,6 +1,7 @@
 """HR/Admin-facing API surface for Module 1 (synthetic data generation),
-Module 2 (per-employee/peer-group baselines), and Module 3 (deviation
-detection + the impossible-travel-rejection audit trail) — see PLAN.md.
+Module 2 (per-employee/peer-group baselines), Module 3 (deviation detection
++ the impossible-travel-rejection audit trail), and Module 4 (insight
+prose + reviewer-action state) — see PLAN.md.
 
 Execution model (T11): every trigger endpoint below is synchronous/blocking
 — the request does not return until WorkforceIntelligenceService has fully
@@ -11,10 +12,6 @@ the finished (or failed) result. If the process crashes mid-request, a
 RUNNING SyntheticDataRun row is left orphaned with no automatic reconciler —
 this ties to the plan's existing no-scheduler decision (0D-POST) and is not
 fixed here.
-
-Module 4 (insights, incl. SHAP explainability) does not exist yet —
-deferred per the plan's scope-narrowing note; Module 3 produces structured
-EmployeeDeviationFlag rows (metric + z-score), not human-readable prose.
 """
 
 import uuid
@@ -25,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission
+from app.models.employee_deviation_flag import ReviewStatus
 from app.models.user import User
 from app.schemas.workforce_intelligence import (
     BaselineRebuildRequest,
@@ -33,9 +31,13 @@ from app.schemas.workforce_intelligence import (
     DetectionRunResultOut,
     EmployeeBaselineOut,
     EmployeeDeviationFlagListOut,
+    EmployeeDeviationFlagOut,
     ImpossibleTravelRejectionListOut,
+    ReviewFlagRequest,
     SyntheticDataGenerateRequest,
     SyntheticDataRunOut,
+    WorkforceInsightListOut,
+    WorkforceInsightOut,
 )
 from app.services.workforce_intelligence_service import (
     SyntheticGenerationError,
@@ -191,3 +193,50 @@ async def list_impossible_travel_rejections(
         employee_id, date_from, date_to, limit, offset
     )
     return ImpossibleTravelRejectionListOut(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
+    "/insights",
+    response_model=WorkforceInsightListOut,
+    dependencies=[Depends(require_permission("workforce_intelligence:read"))],
+)
+async def list_insights(
+    employee_id: uuid.UUID | None = None,
+    window_start: date | None = None,
+    window_end: date | None = None,
+    review_status: ReviewStatus | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> WorkforceInsightListOut:
+    items, total = await WorkforceIntelligenceService(session).list_insights(
+        employee_id, window_start, window_end, review_status, limit, offset
+    )
+    return WorkforceInsightListOut(
+        items=[
+            WorkforceInsightOut(
+                **EmployeeDeviationFlagOut.model_validate(flag).model_dump(), summary=summary
+            )
+            for flag, summary in items
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.patch(
+    "/detection/flags/{flag_id}/review",
+    response_model=EmployeeDeviationFlagOut,
+    dependencies=[Depends(require_permission("workforce_intelligence:write"))],
+)
+async def review_flag(
+    flag_id: uuid.UUID,
+    body: ReviewFlagRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> EmployeeDeviationFlagOut:
+    flag = await WorkforceIntelligenceService(session).review_flag(flag_id, body.status, user.id)
+    if flag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="flag not found")
+    return EmployeeDeviationFlagOut.model_validate(flag)

@@ -13,6 +13,7 @@ from app.core.exceptions import (
     UserNotVerifiedError,
 )
 from app.core.rate_limit import rate_limit
+from app.models.mixins import ensure_aware
 from app.models.user import User
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -39,6 +40,11 @@ def _user_out(user: User) -> UserOut:
         role=user.role.name,
         is_active=user.is_active,
         is_verified=user.is_verified,
+        workforce_intelligence_notice_acknowledged_at=(
+            ensure_aware(user.workforce_intelligence_notice_acknowledged_at)
+            if user.workforce_intelligence_notice_acknowledged_at is not None
+            else None
+        ),
     )
 
 
@@ -125,6 +131,17 @@ async def reset_password(
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)) -> UserOut:
+    return _user_out(user)
+
+
+@router.post("/acknowledge-workforce-intelligence-notice", response_model=UserOut)
+async def acknowledge_workforce_intelligence_notice(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> UserOut:
+    # GOVERNANCE.md Section 2 — any authenticated user (this is a personal
+    # notice acknowledgment, not an admin action; no permission dependency).
+    await AuthService(session).acknowledge_workforce_intelligence_notice(user)
     return _user_out(user)
 
 

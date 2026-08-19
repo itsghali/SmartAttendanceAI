@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.conftest import extract_otp, register_and_verify as _register_and_verify
+from tests.conftest import extract_otp, login, register_and_verify as _register_and_verify
 
 _extract_otp = extract_otp
 
@@ -348,3 +348,56 @@ async def test_change_password_wrong_current_password_rejected(client, caplog, u
         headers=headers,
     )
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_workforce_intelligence_notice_starts_unacknowledged(
+    client, caplog, unique_email
+):
+    await _register_and_verify(client, caplog, unique_email)
+    access = await login(client, unique_email)
+    resp = await client.get("/auth/me", headers={"Authorization": f"Bearer {access}"})
+    assert resp.status_code == 200
+    assert resp.json()["workforce_intelligence_notice_acknowledged_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_acknowledge_workforce_intelligence_notice_sets_timestamp(
+    client, caplog, unique_email
+):
+    await _register_and_verify(client, caplog, unique_email)
+    access = await login(client, unique_email)
+    headers = {"Authorization": f"Bearer {access}"}
+
+    resp = await client.post(
+        "/auth/acknowledge-workforce-intelligence-notice", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["workforce_intelligence_notice_acknowledged_at"] is not None
+
+    me = await client.get("/auth/me", headers=headers)
+    assert me.json()["workforce_intelligence_notice_acknowledged_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_acknowledge_workforce_intelligence_notice_is_idempotent(
+    client, caplog, unique_email
+):
+    await _register_and_verify(client, caplog, unique_email)
+    access = await login(client, unique_email)
+    headers = {"Authorization": f"Bearer {access}"}
+
+    first = await client.post(
+        "/auth/acknowledge-workforce-intelligence-notice", headers=headers
+    )
+    second = await client.post(
+        "/auth/acknowledge-workforce-intelligence-notice", headers=headers
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    # The second call must not overwrite the first real timestamp with a
+    # later one (see UserRepository.acknowledge_workforce_intelligence_notice).
+    assert (
+        first.json()["workforce_intelligence_notice_acknowledged_at"]
+        == second.json()["workforce_intelligence_notice_acknowledged_at"]
+    )

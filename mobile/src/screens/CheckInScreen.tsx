@@ -13,8 +13,10 @@ import { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import { LocationConsentModal } from "../components/LocationConsentModal";
 import { SelfieCapture } from "../components/SelfieCapture";
+import { WorkforceIntelligenceNoticeModal } from "../components/WorkforceIntelligenceNoticeModal";
 import { GeofenceMonitor } from "../services/geofenceMonitor";
-import { logout } from "../store/authSlice";
+import { acknowledgeWorkforceIntelligenceNotice } from "../services/authService";
+import { logout, userUpdated } from "../store/authSlice";
 import { checkIn, checkOut, endBreak, fetchToday, startBreak } from "../store/attendanceSlice";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { formatDuration, formatTime } from "../utils/attendanceFormat";
@@ -45,6 +47,14 @@ export function CheckInScreen({ navigation }: NativeStackScreenProps<any>) {
     "start-break": "break",
     "end-break": "break end",
   };
+
+  // GOVERNANCE.md Section 2 — shown once per account, derived directly from
+  // the server-recorded acknowledgment (not a device-local flag, so it
+  // survives reinstalls/new devices). Guards against a double-tap firing
+  // the request twice while the first is still in flight.
+  const [acknowledgingNotice, setAcknowledgingNotice] = useState(false);
+  const showWorkforceIntelligenceNotice =
+    user !== null && user.workforce_intelligence_notice_acknowledged_at === null;
 
   useEffect(() => {
     dispatch(fetchToday());
@@ -264,6 +274,21 @@ export function CheckInScreen({ navigation }: NativeStackScreenProps<any>) {
         onAllow={() => {
           setPendingAction(consentAction);
           setConsentAction(null);
+        }}
+      />
+
+      <WorkforceIntelligenceNoticeModal
+        visible={showWorkforceIntelligenceNotice && !acknowledgingNotice}
+        onAcknowledge={() => {
+          setAcknowledgingNotice(true);
+          acknowledgeWorkforceIntelligenceNotice()
+            .then((updated) => dispatch(userUpdated(updated)))
+            .catch(() => {
+              // Non-critical: worst case the notice reappears next launch:
+              // never block or degrade check-in over a failed
+              // acknowledgment write.
+            })
+            .finally(() => setAcknowledgingNotice(false));
         }}
       />
 

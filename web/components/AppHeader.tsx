@@ -7,7 +7,13 @@ import { useAuth } from "../lib/auth-context";
 import { listProblemReports } from "../lib/problemReportService";
 import { usePollingExceptions } from "./site-status/usePollingExceptions";
 
-type NavKey = "geofences" | "employees" | "face-enrollment" | "site-status" | "reports";
+type NavKey =
+  | "geofences"
+  | "employees"
+  | "face-enrollment"
+  | "site-status"
+  | "reports"
+  | "anomaly-detection";
 
 const NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: "geofences", label: "Geofences", href: "/geofences" },
@@ -15,6 +21,7 @@ const NAV_ITEMS: { key: NavKey; label: string; href: string }[] = [
   { key: "face-enrollment", label: "Face Enrollment", href: "/face-enrollment" },
   { key: "site-status", label: "Site Status", href: "/site-status" },
   { key: "reports", label: "Reports", href: "/reports" },
+  { key: "anomaly-detection", label: "Anomaly Detection", href: "/anomaly-detection" },
 ];
 
 const BADGE_POLL_INTERVAL_MS = 30_000;

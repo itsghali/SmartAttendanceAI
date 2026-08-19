@@ -51,6 +51,13 @@ const authSlice = createSlice({
       state.user = null;
       state.status = "unauthenticated";
     },
+    // login/restoreSession fully replace the user; this patches it in place
+    // (e.g. after acknowledging WorkforceIntelligenceNoticeModal) without a
+    // spurious loading-state flicker for a change that isn't a session
+    // transition.
+    userUpdated(state, action: PayloadAction<User>) {
+      state.user = action.payload;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -84,5 +91,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { sessionExpired } = authSlice.actions;
+export const { sessionExpired, userUpdated } = authSlice.actions;
 export default authSlice.reducer;

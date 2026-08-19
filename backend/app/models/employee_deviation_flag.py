@@ -14,6 +14,17 @@ class DeviationSeverity(str, enum.Enum):
     HIGH = "high"
 
 
+class ReviewStatus(str, enum.Enum):
+    """Module 4's minimal reviewer-action state (PLAN.md CEO-phase review,
+    Candidate 1) — deliberately NOT the fuller case-resolution system
+    (escalation/assignment/SLA) TODOS.md already has open for geofence
+    exceptions; that stays a shared, deferred question."""
+
+    NEW = "new"
+    REVIEWED = "reviewed"
+    DISMISSED = "dismissed"
+
+
 class EmployeeDeviationFlag(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Module 3 output: one row per (employee, metric, session-or-break
     occurrence) whose value deviates from that employee's own baseline by
@@ -73,6 +84,15 @@ class EmployeeDeviationFlag(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # rate against known ground truth, same idea as Attendance
     # .synthetic_anomaly_type.
     synthetic_anomaly_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # Module 4 reviewer-action state — see ReviewStatus docstring.
+    review_status: Mapped[ReviewStatus] = mapped_column(
+        Enum(ReviewStatus), default=ReviewStatus.NEW, nullable=False
+    )
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     employee: Mapped["Employee"] = relationship()  # noqa: F821
 

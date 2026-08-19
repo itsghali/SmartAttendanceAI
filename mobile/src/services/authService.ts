@@ -9,6 +9,7 @@ export interface User {
   role: string;
   is_active: boolean;
   is_verified: boolean;
+  workforce_intelligence_notice_acknowledged_at: string | null;
 }
 
 export async function login(email: string, password: string): Promise<User> {
@@ -35,6 +36,14 @@ export async function register(
 
 export async function getMe(): Promise<User> {
   const response = await api.get<User>("/auth/me");
+  return response.data;
+}
+
+// GOVERNANCE.md Section 2 — records that the WorkforceIntelligenceNoticeModal
+// was dismissed. Not a permission/consent gate: nothing downstream reads or
+// branches on this beyond deciding whether to show the modal again.
+export async function acknowledgeWorkforceIntelligenceNotice(): Promise<User> {
+  const response = await api.post<User>("/auth/acknowledge-workforce-intelligence-notice");
   return response.data;
 }
 

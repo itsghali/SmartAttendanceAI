@@ -35,7 +35,7 @@ from app.models.attendance import Attendance, AttendanceStatus
 from app.models.break_period import BreakSource
 from app.models.employee import EmployeeStatus
 from app.models.employee_baseline import EmployeeBaseline
-from app.models.employee_deviation_flag import DeviationSeverity
+from app.models.employee_deviation_flag import DeviationSeverity, EmployeeDeviationFlag, ReviewStatus
 from app.models.geofence_event import GeofenceEventType
 from app.models.mixins import utcnow
 from app.models.synthetic_data_run import SyntheticDataRun, SyntheticDataRunStatus
@@ -63,6 +63,7 @@ from workforce_intelligence.exceptions import (  # noqa: E402
     InsufficientHistoryError,
     SyntheticConfigError,
 )
+from workforce_intelligence.insights import generator as insights_generator  # noqa: E402
 from workforce_intelligence.synthetic import generator as synthetic_generator  # noqa: E402
 
 logger = logging.getLogger("app.workforce_intelligence")
@@ -543,4 +544,54 @@ class WorkforceIntelligenceService:
     ):
         return await self._rejections.list_paginated(
             employee_id, date_from, date_to, limit, offset
+        )
+
+    async def list_insights(
+        self,
+        employee_id: uuid.UUID | None,
+        window_start: date | None,
+        window_end: date | None,
+        review_status: ReviewStatus | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[tuple[EmployeeDeviationFlag, str]], int]:
+        """Module 4. Evidence threshold (PLAN.md CEO-phase review, Hour 1):
+        HIGH severity only — MODERATE flags stay structured-only in the
+        existing /detection/flags evidence view, not promoted to prose,
+        while the underlying z-score thresholds remain untuned against real
+        data (TODOS.md)."""
+        items, total = await self._deviation_flags.list_paginated(
+            employee_id,
+            window_start,
+            window_end,
+            limit,
+            offset,
+            severity=DeviationSeverity.HIGH,
+            review_status=review_status,
+        )
+        summarized = [
+            (
+                flag,
+                insights_generator.summarize_flag(
+                    metric=flag.metric,
+                    observed_value=flag.observed_value,
+                    self_mean=flag.self_mean,
+                    self_std=flag.self_std,
+                    self_z=flag.self_z,
+                    peer_z=flag.peer_z,
+                    occurred_at=flag.occurred_at,
+                ),
+            )
+            for flag in items
+        ]
+        return summarized, total
+
+    async def review_flag(
+        self, flag_id: uuid.UUID, status: ReviewStatus, reviewer_id: uuid.UUID | None
+    ) -> EmployeeDeviationFlag | None:
+        flag = await self._deviation_flags.get_by_id(flag_id)
+        if flag is None:
+            return None
+        return await self._deviation_flags.set_review_status(
+            flag, status, reviewer_id, utcnow()
         )

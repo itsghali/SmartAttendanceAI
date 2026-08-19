@@ -188,3 +188,6 @@ class AuthService:
             raise InvalidCredentialsError("current password is incorrect")
         await self._users.update_password(user, hash_password(new_password))
         await self._refresh_tokens.revoke_all_for_user(user.id)
+
+    async def acknowledge_workforce_intelligence_notice(self, user: User) -> None:
+        await self._users.acknowledge_workforce_intelligence_notice(user)

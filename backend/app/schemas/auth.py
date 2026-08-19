@@ -49,6 +49,7 @@ class UserOut(BaseModel):
     role: str
     is_active: bool
     is_verified: bool
+    workforce_intelligence_notice_acknowledged_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

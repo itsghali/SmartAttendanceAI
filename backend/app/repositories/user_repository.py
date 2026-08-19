@@ -58,3 +58,11 @@ class UserRepository:
     async def mark_verified(self, user: User) -> None:
         user.is_verified = True
         await self._session.flush()
+
+    async def acknowledge_workforce_intelligence_notice(self, user: User) -> None:
+        # GOVERNANCE.md Section 2 — idempotent by design: dismissing the
+        # notice twice (e.g. a retried request) must not overwrite an
+        # earlier, real acknowledgment timestamp with a later one.
+        if user.workforce_intelligence_notice_acknowledged_at is None:
+            user.workforce_intelligence_notice_acknowledged_at = utcnow()
+            await self._session.flush()

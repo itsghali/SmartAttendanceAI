@@ -3,7 +3,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.employee_deviation_flag import DeviationSeverity
+from app.models.employee_deviation_flag import DeviationSeverity, ReviewStatus
 from app.models.synthetic_data_run import SyntheticDataRunStatus
 
 # T5: sane upper bounds on BOTH generate's and rebuild's request scope
@@ -115,6 +115,9 @@ class EmployeeDeviationFlagOut(BaseModel):
     detected_at: datetime
     is_synthetic: bool
     synthetic_anomaly_type: str | None
+    review_status: ReviewStatus
+    reviewed_by: uuid.UUID | None
+    reviewed_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -124,6 +127,26 @@ class EmployeeDeviationFlagListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class WorkforceInsightOut(EmployeeDeviationFlagOut):
+    """Module 4 — same fields as a raw EmployeeDeviationFlagOut (evidence
+    view, HR/Admin can drill down to the exact numbers) plus the generated
+    prose. Always HIGH severity — see
+    WorkforceIntelligenceService.list_insights's evidence-threshold note."""
+
+    summary: str
+
+
+class WorkforceInsightListOut(BaseModel):
+    items: list[WorkforceInsightOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ReviewFlagRequest(BaseModel):
+    status: ReviewStatus
 
 
 class ImpossibleTravelRejectionOut(BaseModel):

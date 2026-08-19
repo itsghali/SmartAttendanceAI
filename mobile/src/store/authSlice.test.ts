@@ -3,7 +3,7 @@ import { AxiosError, AxiosHeaders } from "axios";
 
 import * as authService from "../services/authService";
 import * as tokenStorage from "../services/tokenStorage";
-import authReducer, { login, logout, restoreSession, sessionExpired } from "./authSlice";
+import authReducer, { login, logout, restoreSession, sessionExpired, userUpdated } from "./authSlice";
 
 jest.mock("../services/authService");
 jest.mock("../services/tokenStorage");
@@ -16,9 +16,11 @@ const USER = {
   id: "u1",
   email: "jane@example.com",
   full_name: "Jane Doe",
+  phone_number: null,
   role: "employee",
   is_active: true,
   is_verified: true,
+  workforce_intelligence_notice_acknowledged_at: null,
 };
 
 describe("authSlice", () => {
@@ -105,5 +107,17 @@ describe("authSlice", () => {
 
     expect(store.getState().auth.user).toBeNull();
     expect(store.getState().auth.status).toBe("unauthenticated");
+  });
+
+  it("userUpdated patches the logged-in user without a status/loading flicker", async () => {
+    (authService.login as jest.Mock).mockResolvedValue(USER);
+    const store = buildStore();
+    await store.dispatch(login({ email: USER.email, password: "Password123" }));
+
+    const updated = { ...USER, workforce_intelligence_notice_acknowledged_at: "2026-08-18T00:00:00Z" };
+    store.dispatch(userUpdated(updated));
+
+    expect(store.getState().auth.user).toEqual(updated);
+    expect(store.getState().auth.status).toBe("authenticated");
   });
 });
