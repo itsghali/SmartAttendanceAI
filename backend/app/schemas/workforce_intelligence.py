@@ -106,9 +106,11 @@ class EmployeeDeviationFlagOut(BaseModel):
     self_mean: float
     self_std: float
     self_z: float | None
+    self_n: int | None
     peer_mean: float
     peer_std: float
     peer_z: float | None
+    peer_n: int | None
     severity: DeviationSeverity
     window_start: date
     window_end: date
@@ -131,11 +133,23 @@ class EmployeeDeviationFlagListOut(BaseModel):
 
 class WorkforceInsightOut(EmployeeDeviationFlagOut):
     """Module 4 — same fields as a raw EmployeeDeviationFlagOut (evidence
-    view, HR/Admin can drill down to the exact numbers) plus the generated
-    prose. Always HIGH severity — see
-    WorkforceIntelligenceService.list_insights's evidence-threshold note."""
+    view, HR/Admin can drill down to the exact numbers) plus the
+    Requirement-2 human-readable presentation. Always HIGH severity — see
+    WorkforceIntelligenceService.list_insights's evidence-threshold note.
 
+    `summary`/`explanation`/`evidence`/`recommended_action` are the primary,
+    human-facing fields (no metric identifiers or z-scores); `technical`
+    carries the same underlying statistics the raw EmployeeDeviationFlagOut
+    fields above already expose, kept here too so a client can render the
+    "Technical Details" disclosure straight off one object.
+    """
+
+    title: str
     summary: str
+    explanation: str
+    evidence: dict
+    technical: dict
+    recommended_action: list[dict]
 
 
 class WorkforceInsightListOut(BaseModel):

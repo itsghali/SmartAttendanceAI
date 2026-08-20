@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.mixins import utcnow
-from app.models.role import Role
+from app.models.role import Permission, Role, role_permissions
 from app.models.user import User
 
 
@@ -58,6 +58,22 @@ class UserRepository:
     async def mark_verified(self, user: User) -> None:
         user.is_verified = True
         await self._session.flush()
+
+    async def list_active_recipients_for_permission(self, permission_code: str) -> list[User]:
+        """Every active user whose role carries `permission_code` — used to
+        fan out Workforce Intelligence notifications to whichever roles can
+        already see /workforce-intelligence/* (currently admin, hr_manager,
+        super_admin per app/core/seed.py), without a separate
+        "notification recipient" permission or role list to keep in sync."""
+        stmt = (
+            select(User)
+            .join(Role, User.role_id == Role.id)
+            .join(role_permissions, role_permissions.c.role_id == Role.id)
+            .join(Permission, Permission.id == role_permissions.c.permission_id)
+            .where(Permission.code == permission_code, User.is_active.is_(True))
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().unique().all())
 
     async def acknowledge_workforce_intelligence_notice(self, user: User) -> None:
         # GOVERNANCE.md Section 2 — idempotent by design: dismissing the

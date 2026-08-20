@@ -14,6 +14,7 @@ from app.models.face_verification_attempt import (
 from app.models.geofence import Geofence, GeofenceBoundaryType
 from app.models.geofence_event import GeofenceEvent, GeofenceEventType
 from app.models.impossible_travel_rejection import ImpossibleTravelRejection
+from app.models.notification import EmailStatus, Notification
 from app.models.otp import OTPCode, OTPPurpose
 from app.models.problem_report import ProblemReport, ProblemReportStatus
 from app.models.refresh_token import RefreshToken
@@ -28,6 +29,7 @@ __all__ = [
     "Department",
     "DeviationSeverity",
     "Device",
+    "EmailStatus",
     "Employee",
     "EmployeeBaseline",
     "EmployeeDeviationFlag",
@@ -41,6 +43,7 @@ __all__ = [
     "GeofenceEvent",
     "GeofenceEventType",
     "ImpossibleTravelRejection",
+    "Notification",
     "OTPCode",
     "OTPPurpose",
     "ProblemReport",

@@ -98,6 +98,15 @@ class AttendanceRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def has_any_for_employee(self, employee_id: uuid.UUID) -> bool:
+        """Cheap existence check (real OR synthetic rows) — lets the
+        workforce-intelligence daily job (app/core/scheduler.py) decide
+        whether an employee still needs a one-time synthetic bootstrap
+        corpus before a baseline can be built, without loading any rows."""
+        stmt = select(Attendance.id).where(Attendance.employee_id == employee_id).limit(1)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
     async def get_by_id(self, attendance_id: uuid.UUID) -> Attendance | None:
         stmt = (
             select(Attendance)

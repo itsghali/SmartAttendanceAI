@@ -40,6 +40,9 @@ ai/test_faces/demo_user.png
 # smoke_test_face.py's runtime fixtures (cropped from insightface's bundled sample photo)
 backend/.smoke_face_fixtures/
 
+# evaluate_face_verification.py's downloaded/extracted LFW dataset cache (~232MB, not source)
+backend/.face_eval_cache/
+
 # os
 .DS_Store
 Thumbs.db
@@ -50,6 +53,8 @@ Thumbs.db
 
 # scratch markdown docs
 *.md
+!backend/scripts/face_eval_results/report_section.md
+*.docx
 *.claude
 .vercel
 .gstack/

@@ -76,3 +76,6 @@ class EmailService:
         }.get(purpose, "Your SmartAttendanceAI verification code")
         body = f"Your verification code is {code}. It expires in 10 minutes."
         self._backend.send(to, subject, body)
+
+    def send_workforce_intelligence_alert(self, to: str, subject: str, body: str) -> None:
+        self._backend.send(to, subject, body)

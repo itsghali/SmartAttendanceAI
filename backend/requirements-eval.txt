@@ -1,0 +1,7 @@
+# Eval-only dependencies for backend/scripts/evaluate_face_verification.py.
+# NOT part of the production backend/requirements.txt / Docker image — this
+# script evaluates the pretrained face-verification pipeline against a public
+# dataset for PFE/academic reporting; scikit-learn/matplotlib have no role in
+# the running SmartAttendanceAI backend itself.
+scikit-learn==1.9.0
+matplotlib==3.11.1

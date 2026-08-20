@@ -31,6 +31,7 @@ from pathlib import Path
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.geo import Coordinates, haversine_distance_meters
 from app.models.attendance import Attendance, AttendanceStatus
 from app.models.break_period import BreakSource
 from app.models.employee import EmployeeStatus
@@ -50,6 +51,7 @@ from app.repositories.impossible_travel_rejection_repository import (
     ImpossibleTravelRejectionRepository,
 )
 from app.repositories.synthetic_data_run_repository import SyntheticDataRunRepository
+from app.services.notification_service import NotificationService
 
 _AI_DIR = Path(__file__).resolve().parents[3] / "ai"
 if str(_AI_DIR) not in sys.path:
@@ -99,6 +101,20 @@ def _to_attendance_record(a: Attendance) -> baseline_builder.AttendanceRecord:
         for e in a.geofence_events
         if e.event_type in (GeofenceEventType.EXIT, GeofenceEventType.RETURN)
     ]
+    checkout_distance_from_checkin_km = None
+    if (
+        a.check_in_latitude is not None
+        and a.check_in_longitude is not None
+        and a.check_out_latitude is not None
+        and a.check_out_longitude is not None
+    ):
+        checkout_distance_from_checkin_km = (
+            haversine_distance_meters(
+                Coordinates(a.check_in_latitude, a.check_in_longitude),
+                Coordinates(a.check_out_latitude, a.check_out_longitude),
+            )
+            / 1000
+        )
     return baseline_builder.AttendanceRecord(
         employee_id=a.employee_id,
         check_in_at=a.check_in_at,
@@ -110,6 +126,7 @@ def _to_attendance_record(a: Attendance) -> baseline_builder.AttendanceRecord:
         is_synthetic=a.is_synthetic,
         synthetic_run_id=a.synthetic_run_id,
         attendance_id=a.id,
+        checkout_distance_from_checkin_km=checkout_distance_from_checkin_km,
     )
 
 
@@ -456,6 +473,7 @@ class WorkforceIntelligenceService:
         scored: list[uuid.UUID] = []
         skipped_no_baseline: list[uuid.UUID] = []
         flag_counts: dict[str, int] = {}
+        new_flag_rows: list[EmployeeDeviationFlag] = []
         detected_at = utcnow()
 
         for e in targets:
@@ -499,9 +517,11 @@ class WorkforceIntelligenceService:
                         "self_mean": f.self_mean,
                         "self_std": f.self_std,
                         "self_z": f.self_z,
+                        "self_n": f.self_n,
                         "peer_mean": f.peer_mean,
                         "peer_std": f.peer_std,
                         "peer_z": f.peer_z,
+                        "peer_n": f.peer_n,
                         "severity": DeviationSeverity(f.severity),
                         "window_start": window_start,
                         "window_end": window_end,
@@ -512,9 +532,20 @@ class WorkforceIntelligenceService:
                     }
                     for f in flags
                 ]
-                await self._deviation_flags.bulk_create(rows)
+                created_rows = await self._deviation_flags.bulk_create(rows)
+                # Synthetic flags never reach a real HR/Admin notification —
+                # same "excluded from any real-employee-facing read path by
+                # default" rule EmployeeDeviationFlag's own docstring states
+                # for is_synthetic rows generally.
+                new_flag_rows.extend(r for r in created_rows if not r.is_synthetic)
             scored.append(e.id)
             flag_counts[str(e.id)] = len(flags)
+
+        if new_flag_rows:
+            notification_service = NotificationService(self._session)
+            await notification_service.notify_new_flags(
+                new_flag_rows, {e.id: e for e in targets}
+            )
 
         return {
             "scored": scored,
@@ -554,12 +585,17 @@ class WorkforceIntelligenceService:
         review_status: ReviewStatus | None,
         limit: int,
         offset: int,
-    ) -> tuple[list[tuple[EmployeeDeviationFlag, str]], int]:
+    ) -> tuple[list[tuple[EmployeeDeviationFlag, dict]], int]:
         """Module 4. Evidence threshold (PLAN.md CEO-phase review, Hour 1):
         HIGH severity only — MODERATE flags stay structured-only in the
         existing /detection/flags evidence view, not promoted to prose,
         while the underlying z-score thresholds remain untuned against real
-        data (TODOS.md)."""
+        data (TODOS.md).
+
+        Returns the Requirement-2 presentation dict (title/summary/
+        explanation/evidence/technical/recommended_action) per flag, same
+        shape NotificationService.notify_new_flags builds off the live flag
+        row — see insights/generator.py's build_presentation."""
         items, total = await self._deviation_flags.list_paginated(
             employee_id,
             window_start,
@@ -569,22 +605,28 @@ class WorkforceIntelligenceService:
             severity=DeviationSeverity.HIGH,
             review_status=review_status,
         )
-        summarized = [
+        presented = [
             (
                 flag,
-                insights_generator.summarize_flag(
+                insights_generator.build_presentation(
                     metric=flag.metric,
                     observed_value=flag.observed_value,
                     self_mean=flag.self_mean,
                     self_std=flag.self_std,
                     self_z=flag.self_z,
+                    self_n=flag.self_n,
+                    peer_mean=flag.peer_mean,
+                    peer_std=flag.peer_std,
                     peer_z=flag.peer_z,
+                    peer_n=flag.peer_n,
+                    severity=flag.severity.value,
                     occurred_at=flag.occurred_at,
+                    detected_at=flag.detected_at,
                 ),
             )
             for flag in items
         ]
-        return summarized, total
+        return presented, total
 
     async def review_flag(
         self, flag_id: uuid.UUID, status: ReviewStatus, reviewer_id: uuid.UUID | None

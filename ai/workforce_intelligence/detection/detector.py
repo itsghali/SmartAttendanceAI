@@ -61,9 +61,15 @@ class DeviationFlag:
     self_mean: float
     self_std: float
     self_z: float | None
+    # self_n/peer_n: the MetricStats sample size the flag was scored
+    # against. Not used in scoring itself — carried through purely so the
+    # presentation layer (insights/generator.py) can show a real "based on
+    # N historical observations" count instead of omitting or faking one.
+    self_n: int
     peer_mean: float
     peer_std: float
     peer_z: float | None
+    peer_n: int
     severity: str  # "moderate" | "high"
     is_synthetic: bool
     synthetic_run_id: uuid.UUID | None
@@ -123,9 +129,11 @@ def _score_one(
         self_mean=self_stats.mean,
         self_std=self_stats.std,
         self_z=self_z,
+        self_n=self_stats.n,
         peer_mean=peer_stats.mean if peer_stats.mean is not None else 0.0,
         peer_std=peer_stats.std if peer_stats.std is not None else 0.0,
         peer_z=peer_z,
+        peer_n=peer_stats.n,
         severity=severity,
         is_synthetic=session.is_synthetic,
         synthetic_run_id=session.synthetic_run_id,
@@ -212,6 +220,23 @@ def detect_for_employee(
                 session=s,
                 self_stats=self_metrics["break_duration_minutes"],
                 peer_stats=peer_metrics["break_duration_minutes"],
+                threshold=threshold,
+            )
+            if flag is not None:
+                flags.append(flag)
+
+        # Only scored when a checkout position exists (regular sessions with
+        # both check-in and check-out coordinates) — occurred_at is
+        # check_out_at, not check_in_at like the other session-level metrics
+        # above, since this signal is only meaningful once checkout happened.
+        if s.checkout_distance_from_checkin_km is not None:
+            flag = _score_one(
+                metric="checkout_distance_from_checkin_km",
+                value=s.checkout_distance_from_checkin_km,
+                occurred_at=s.check_out_at,
+                session=s,
+                self_stats=self_metrics["checkout_distance_from_checkin_km"],
+                peer_stats=peer_metrics["checkout_distance_from_checkin_km"],
                 threshold=threshold,
             )
             if flag is not None:

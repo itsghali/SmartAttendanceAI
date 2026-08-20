@@ -215,9 +215,15 @@ async def list_insights(
     return WorkforceInsightListOut(
         items=[
             WorkforceInsightOut(
-                **EmployeeDeviationFlagOut.model_validate(flag).model_dump(), summary=summary
+                **EmployeeDeviationFlagOut.model_validate(flag).model_dump(),
+                title=presentation["title"],
+                summary=presentation["summary"],
+                explanation=presentation["explanation"],
+                evidence=presentation["evidence"],
+                technical=presentation["technical"],
+                recommended_action=presentation["recommended_action"],
             )
-            for flag, summary in items
+            for flag, presentation in items
         ],
         total=total,
         limit=limit,

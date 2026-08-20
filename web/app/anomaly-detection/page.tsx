@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AxiosError } from "axios";
 
 import AppHeader from "../../components/AppHeader";
@@ -9,6 +10,7 @@ import { Employee, listEmployees } from "../../lib/employeeService";
 import {
   DeviationFlagList,
   EmployeeBaseline,
+  EmployeeDeviationFlag,
   ImpossibleTravelRejectionList,
   InsightList,
   ReviewStatus,
@@ -57,6 +59,58 @@ function formatZ(z: number | null): string {
 
 function formatNum(n: number): string {
   return Number.isFinite(n) ? n.toFixed(1) : "—";
+}
+
+// Plain-English labels for the metric keys the backend emits (snake_case,
+// unit baked into the name) — HR/Admin readers shouldn't have to parse
+// "checkin_time_of_day_minutes" themselves.
+const METRIC_LABELS: Record<string, string> = {
+  work_duration_minutes: "Work duration",
+  checkin_time_of_day_minutes: "Check-in time",
+  break_duration_minutes: "Break duration",
+  break_count: "Number of breaks",
+  geofence_exit_count: "Site exits",
+};
+
+function metricLabel(metric: string): string {
+  return METRIC_LABELS[metric] ?? metric.replace(/_/g, " ");
+}
+
+// Renders a raw metric value in the unit an HR reader actually thinks in,
+// instead of the backend's internal representation (minutes since
+// midnight, raw minute counts).
+function formatMetricValue(metric: string, value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  if (metric === "checkin_time_of_day_minutes") {
+    const totalMinutes = Math.round(value);
+    const hours = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
+  if (metric.endsWith("_duration_minutes")) {
+    const totalMinutes = Math.round(value);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+  if (metric.endsWith("_count")) {
+    return String(Math.round(value));
+  }
+  return formatNum(value);
+}
+
+// Turns the self/peer z-scores into a sentence an HR reader doesn't need
+// a stats background to parse — magnitude in words plus direction, or a
+// plain "broke a fixed pattern" note when there's no self_z (e.g. a count
+// metric that had exactly one value historically).
+function deviationSummary(f: EmployeeDeviationFlag): string {
+  if (f.self_z === null) {
+    return "Broke a pattern that had never varied before";
+  }
+  const magnitude = Math.abs(f.self_z);
+  const direction = f.observed_value >= f.self_mean ? "above" : "below";
+  const word = magnitude >= 5 ? "extremely" : magnitude >= 3 ? "highly" : "moderately";
+  return `${word} unusual — ${magnitude.toFixed(1)}× ${direction} this person's usual pattern`;
 }
 
 function AnomalyDetectionPageContent() {
@@ -113,6 +167,20 @@ function AnomalyDetectionPageContent() {
     listEmployees()
       .then(setEmployees)
       .catch((err) => setLoadError(apiErrorMessage(err)));
+  }, []);
+
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    // Notification "View details" deep link (?employee_id=...) — a
+    // page-level link, not a specific flag id, since detection reruns
+    // delete and recreate flag rows for a window (see
+    // WorkforceIntelligenceService.run_detection) and a flag id from an
+    // email sent days ago may no longer exist by the time it's clicked.
+    const employeeIdParam = searchParams.get("employee_id");
+    if (employeeIdParam) {
+      setSelectedEmployeeId(employeeIdParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const employeeName = useMemo(() => {
@@ -411,12 +479,12 @@ function AnomalyDetectionPageContent() {
                 insights?.items.map((i) => (
                   <div
                     key={i.id}
-                    className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+                    className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-zinc-900 dark:text-zinc-50">
                         {!selectedEmployeeId && `${employeeName(i.employee_id)} — `}
-                        {i.metric}
+                        {i.title}
                       </span>
                       <div className="flex items-center gap-2">
                         {i.is_synthetic && (
@@ -427,7 +495,75 @@ function AnomalyDetectionPageContent() {
                         <span className={severityBadgeClass(i.severity)}>{i.severity}</span>
                       </div>
                     </div>
+
+                    {/* WHAT happened */}
                     <p className="text-sm text-zinc-700 dark:text-zinc-300">{i.summary}</p>
+
+                    {/* WHY it was flagged */}
+                    <div className="text-sm">
+                      <span className="font-medium text-zinc-500">Why was this detected? </span>
+                      <span className="text-zinc-600 dark:text-zinc-400">{i.explanation}</span>
+                    </div>
+
+                    {/* WHAT the evidence is — human units only, no z-scores */}
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 rounded border border-zinc-100 bg-zinc-50 p-3 text-xs dark:border-zinc-900 dark:bg-zinc-950 sm:grid-cols-3">
+                      <div>
+                        <dt className="text-zinc-400">Current value</dt>
+                        <dd className="text-zinc-800 dark:text-zinc-200">{i.evidence.current}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">Baseline</dt>
+                        <dd className="text-zinc-800 dark:text-zinc-200">{i.evidence.baseline}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">Difference</dt>
+                        <dd className="text-zinc-800 dark:text-zinc-200">{i.evidence.difference}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">Historical observations</dt>
+                        <dd className="text-zinc-800 dark:text-zinc-200">
+                          {i.evidence.historical_observations ?? "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">Severity</dt>
+                        <dd className="text-zinc-800 dark:text-zinc-200">{i.evidence.severity}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">Detection type</dt>
+                        <dd className="text-zinc-800 dark:text-zinc-200">
+                          {i.evidence.detection_type}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <details className="text-xs text-zinc-500">
+                      <summary className="cursor-pointer select-none">Technical Details</summary>
+                      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 font-mono sm:grid-cols-3">
+                        <div>
+                          <dt className="text-zinc-400">metric</dt>
+                          <dd>{i.technical.metric}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-zinc-400">self_z</dt>
+                          <dd>{formatZ(i.technical.self_z)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-zinc-400">peer_z</dt>
+                          <dd>{formatZ(i.technical.peer_z)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-zinc-400">self_n</dt>
+                          <dd>{i.technical.self_n ?? "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-zinc-400">peer_n</dt>
+                          <dd>{i.technical.peer_n ?? "—"}</dd>
+                        </div>
+                      </dl>
+                    </details>
+
+                    {/* WHAT the HR/Admin user can do next */}
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-zinc-400">
                         {i.review_status === "new"
@@ -435,13 +571,21 @@ function AnomalyDetectionPageContent() {
                           : `${i.review_status} ${i.reviewed_at ? `on ${new Date(i.reviewed_at).toLocaleDateString()}` : ""}`}
                       </span>
                       <div className="flex gap-2 text-xs">
+                        {!selectedEmployeeId && (
+                          <button
+                            onClick={() => selectEmployee(i.employee_id)}
+                            className="text-blue-600 underline"
+                          >
+                            View Employee
+                          </button>
+                        )}
                         {i.review_status !== "reviewed" && (
                           <button
                             disabled={reviewingId === i.id}
                             onClick={() => submitReview(i.id, "reviewed")}
                             className="text-blue-600 underline disabled:opacity-30"
                           >
-                            Mark reviewed
+                            Mark as Reviewed
                           </button>
                         )}
                         {i.review_status !== "dismissed" && (
@@ -518,35 +662,39 @@ function AnomalyDetectionPageContent() {
                   <thead className="text-xs uppercase text-zinc-500">
                     <tr>
                       <th className="py-1 pr-4">Metric</th>
-                      <th className="py-1 pr-4">Self mean ± std (n)</th>
-                      <th className="py-1 pr-4">Peer mean ± std (n)</th>
-                      <th className="py-1 pr-4">Peer source</th>
+                      <th className="py-1 pr-4">This employee&apos;s normal</th>
+                      <th className="py-1 pr-4">Peer group&apos;s normal</th>
+                      <th className="py-1 pr-4">Compared against</th>
                     </tr>
                   </thead>
                   <tbody>
                     {Object.entries(baseline.metric_stats).map(([metric, stats]) => (
                       <tr key={metric} className="border-t border-zinc-100 dark:border-zinc-900">
-                        <td className="py-1.5 pr-4 text-zinc-900 dark:text-zinc-50">{metric}</td>
+                        <td className="py-1.5 pr-4 text-zinc-900 dark:text-zinc-50">
+                          {metricLabel(metric)}
+                        </td>
                         <td className="py-1.5 pr-4 text-zinc-600 dark:text-zinc-400">
                           {stats.self.mean !== null
-                            ? `${formatNum(stats.self.mean)} ± ${formatNum(stats.self.std ?? 0)} (${stats.self.n})`
+                            ? `usually ${formatMetricValue(metric, stats.self.mean)} (±${formatMetricValue(metric, stats.self.std ?? 0)}, from ${stats.self.n} days)`
                             : "—"}
                         </td>
                         <td className="py-1.5 pr-4 text-zinc-600 dark:text-zinc-400">
                           {stats.peer.mean !== null
-                            ? `${formatNum(stats.peer.mean)} ± ${formatNum(stats.peer.std ?? 0)} (${stats.peer.n})`
+                            ? `usually ${formatMetricValue(metric, stats.peer.mean)} (±${formatMetricValue(metric, stats.peer.std ?? 0)}, from ${stats.peer.n} days)`
                             : "—"}
                         </td>
                         <td className="py-1.5 pr-4 text-zinc-600 dark:text-zinc-400">
-                          {stats.peer.source}
+                          {stats.peer.source === "department" ? "Department" : "Company-wide"}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 <p className="mt-2 text-xs text-zinc-400">
-                  Window {baseline.window_start} → {baseline.window_end}, computed{" "}
-                  {new Date(baseline.computed_at).toLocaleString()}
+                  This employee&apos;s normal pattern, calculated from {baseline.window_start} to{" "}
+                  {baseline.window_end} (last recalculated{" "}
+                  {new Date(baseline.computed_at).toLocaleString()}). Deviation flags below compare
+                  new readings against these numbers.
                 </p>
               </div>
             )}
@@ -575,11 +723,16 @@ function AnomalyDetectionPageContent() {
                   {!selectedEmployeeId && <th className="px-4 py-2">Employee</th>}
                   <th className="px-4 py-2">Metric</th>
                   <th className="px-4 py-2">Observed</th>
-                  <th className="px-4 py-2">Self z</th>
-                  <th className="px-4 py-2">Peer z</th>
+                  <th className="px-4 py-2">What this means</th>
+                  <th
+                    className="px-4 py-2"
+                    title="Self z: how many standard deviations this reading is from the employee's own historical average. Peer z: the same, compared against their department/company peers. 0 = typical, further from 0 = more unusual."
+                  >
+                    Self z / Peer z
+                  </th>
                   <th className="px-4 py-2">Severity</th>
                   <th className="px-4 py-2">Occurred</th>
-                  <th className="px-4 py-2">Source</th>
+                  <th className="px-4 py-2">Data source</th>
                 </tr>
               </thead>
               <tbody>
@@ -605,12 +758,18 @@ function AnomalyDetectionPageContent() {
                           {employeeName(f.employee_id)}
                         </td>
                       )}
-                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">{f.metric}</td>
-                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                        {formatNum(f.observed_value)}
+                      <td className="px-4 py-2 text-zinc-900 dark:text-zinc-50">
+                        {metricLabel(f.metric)}
                       </td>
-                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">{formatZ(f.self_z)}</td>
-                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">{formatZ(f.peer_z)}</td>
+                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
+                        {formatMetricValue(f.metric, f.observed_value)}
+                      </td>
+                      <td className="max-w-[280px] px-4 py-2 text-zinc-700 dark:text-zinc-300">
+                        {deviationSummary(f)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-zinc-500 dark:text-zinc-500">
+                        {formatZ(f.self_z)} / {formatZ(f.peer_z)}
+                      </td>
                       <td className="px-4 py-2">
                         <span className={severityBadgeClass(f.severity)}>{f.severity}</span>
                       </td>
@@ -618,17 +777,22 @@ function AnomalyDetectionPageContent() {
                         {new Date(f.occurred_at).toLocaleString()}
                       </td>
                       <td className="px-4 py-2">
-                        {f.is_synthetic && (
-                          <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                            synthetic
-                          </span>
-                        )}
+                        <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                          {f.is_synthetic ? "Synthetic" : "Live"}
+                        </span>
                       </td>
                     </tr>
                   ))}
               </tbody>
             </table>
           </div>
+          {flags && flags.items.length > 0 && (
+            <p className="px-4 pb-3 text-xs text-zinc-400">
+              &quot;Self z / Peer z&quot; is the raw statistical measure behind the plain-English
+              summary — 0 is typical, the further from 0 the more unusual. Kept here for audit
+              purposes.
+            </p>
+          )}
           {flags && flags.total > PAGE_SIZE && (
             <div className="flex items-center justify-between px-4 py-3 text-xs text-zinc-500">
               <span>
@@ -928,7 +1092,9 @@ function AnomalyDetectionPageContent() {
 export default function AnomalyDetectionPage() {
   return (
     <RequireAuth allowedRoles={["hr_manager", "admin", "super_admin"]}>
-      <AnomalyDetectionPageContent />
+      <Suspense fallback={null}>
+        <AnomalyDetectionPageContent />
+      </Suspense>
     </RequireAuth>
   );
 }

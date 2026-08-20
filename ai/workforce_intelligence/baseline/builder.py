@@ -45,6 +45,7 @@ METRICS = (
     "break_duration_minutes",
     "break_count",
     "geofence_exit_count",
+    "checkout_distance_from_checkin_km",
 )
 
 
@@ -74,6 +75,13 @@ class AttendanceRecord:
     is_synthetic: bool = False
     synthetic_run_id: uuid.UUID | None = None
     attendance_id: uuid.UUID | None = None
+    # Pre-computed by the caller (backend/app/services/workforce_intelligence_
+    # service.py, via app.core.geo.haversine_distance_meters — the one
+    # haversine implementation in the repo, not duplicated here to keep this
+    # package pure/DB-agnostic). None when either endpoint's coordinates are
+    # missing (manual entries, open sessions) — never coerced to 0.0, which
+    # would read as "checked out exactly where they checked in."
+    checkout_distance_from_checkin_km: float | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +137,7 @@ def compute_metrics(sessions: list[AttendanceRecord]) -> dict[str, MetricStats]:
     break_minutes: list[float] = []
     break_counts: list[float] = []
     exit_counts: list[float] = []
+    checkout_distances_km: list[float] = []
 
     for s in sessions:
         session_clean = s.synthetic_anomaly_type is None
@@ -137,6 +146,13 @@ def compute_metrics(sessions: list[AttendanceRecord]) -> dict[str, MetricStats]:
             if s.check_out_at is not None:
                 work_minutes.append((s.check_out_at - s.check_in_at).total_seconds() / 60)
             break_counts.append(float(len(s.breaks)))
+            # No separate T9 flag needed beyond session_clean: far_checkout is
+            # a session-level anomaly (already gated by session_clean above),
+            # and missed_checkout sessions have no checkout coordinates at all
+            # so checkout_distance_from_checkin_km is already None for them —
+            # the `is not None` guard excludes them without a second check.
+            if s.checkout_distance_from_checkin_km is not None:
+                checkout_distances_km.append(s.checkout_distance_from_checkin_km)
         for b in s.breaks:
             if b.synthetic_anomaly_type is None:
                 break_minutes.append(b.duration_minutes)
@@ -148,6 +164,7 @@ def compute_metrics(sessions: list[AttendanceRecord]) -> dict[str, MetricStats]:
         "work_duration_minutes": _stats(work_minutes),
         "break_duration_minutes": _stats(break_minutes),
         "break_count": _stats(break_counts),
+        "checkout_distance_from_checkin_km": _stats(checkout_distances_km),
         "geofence_exit_count": _stats(exit_counts),
     }
 

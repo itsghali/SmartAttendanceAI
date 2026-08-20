@@ -100,6 +100,36 @@ class Settings(BaseSettings):
         default_factory=lambda: ["24xm4P3u0ka-ik3EZdt9dX8M1t-Rb3YAMoUeXD6x1ow="]
     )
 
+    # Workforce-intelligence daily automation (app/core/scheduler.py):
+    # rebuilds baselines + runs detection for every active/on-leave employee
+    # on a schedule, and gives an employee with zero attendance history a
+    # one-time synthetic bootstrap corpus first (this system's only
+    # bootstrap data source per PLAN.md — see
+    # AttendanceRepository.list_for_baseline_including_synthetic's
+    # docstring). Supersedes the Admin-actions panel as the default path;
+    # that panel still works for on-demand re-runs. Single-container
+    # deploy (Dockerfile runs one uvicorn process, no --workers) — this is
+    # an in-process scheduler, not a distributed lock; running multiple
+    # backend replicas would fire this job once per replica (harmless
+    # today since rebuild/detect overwrite idempotently and synthetic
+    # backfill is idempotency-key-guarded, but wasteful).
+    workforce_intelligence_auto_schedule: bool = Field(default=True)
+    workforce_intelligence_schedule_hour_utc: int = Field(default=2)
+
+    # Kill switch for the email channel specifically (app/services/
+    # notification_service.py), independent of smtp_host being set — dev/CI
+    # can leave this on with no SMTP configured (falls back to
+    # ConsoleEmailBackend, which logs instead of sending) or turn it off
+    # outright without touching SMTP config. The in-app notification record
+    # is created either way (see NotificationService.notify_new_flags) —
+    # this only gates the external email send.
+    workforce_intelligence_email_notifications_enabled: bool = Field(default=True)
+
+    # Base URL the web dashboard is served from, used only to build the
+    # "View details" deep link in notification emails
+    # (ai/workforce_intelligence/insights/generator.py's render_email).
+    frontend_base_url: str = Field(default="http://localhost:3000")
+
 
 @lru_cache
 def get_settings() -> Settings:

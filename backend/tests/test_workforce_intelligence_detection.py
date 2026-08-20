@@ -104,6 +104,62 @@ async def test_detection_recalls_labeled_anomalies_with_low_false_positive_rate(
 
 
 @pytest.mark.asyncio
+async def test_far_checkout_recalled_via_checkout_distance_metric(
+    client, db_session, caplog, unique_email
+):
+    """Closes the far_checkout coverage gap: proves the full production path
+    (generate_synthetic_data -> Attendance rows with real check-in/check-out
+    coordinates -> _to_attendance_record's haversine passthrough ->
+    checkout_distance_from_checkin_km baseline+detection) actually flags a
+    checkout GPS-distance anomaly, not just that the pure ai/ functions do in
+    isolation (see ai/workforce_intelligence/tests/test_detector.py for
+    those)."""
+    hr_headers = await _hr_headers(client, db_session, caplog, unique_email)
+    employee_id = await _make_employee_with_geofence(client, hr_headers, unique_email)
+
+    service = WorkforceIntelligenceService(db_session)
+    await service.generate_synthetic_data(
+        requested_by=None,
+        employee_ids=[employee_id],
+        date_range_start=WINDOW_START,
+        date_range_end=WINDOW_END,
+        anomaly_config={"far_checkout": 0.2},
+        seed=43,
+    )
+    await service.rebuild_baselines(
+        employee_ids=[employee_id], window_start=WINDOW_START, window_end=WINDOW_END
+    )
+    detect_result = await service.run_detection(
+        employee_ids=[employee_id], window_start=WINDOW_START, window_end=WINDOW_END
+    )
+    assert employee_id in detect_result["scored"]
+
+    flags = (
+        (
+            await db_session.execute(
+                select(EmployeeDeviationFlag).where(
+                    EmployeeDeviationFlag.employee_id == employee_id,
+                    EmployeeDeviationFlag.metric == "checkout_distance_from_checkin_km",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    flagged_by_anomaly_type = {
+        f.synthetic_anomaly_type for f in flags if f.synthetic_anomaly_type is not None
+    }
+    # Before this change, checkout_distance_from_checkin_km didn't exist as a
+    # metric at all -- this assertion would have been impossible to satisfy.
+    assert "far_checkout" in flagged_by_anomaly_type
+
+    clean_flags = [f for f in flags if f.synthetic_anomaly_type is None]
+    far_checkout_flags = [f for f in flags if f.synthetic_anomaly_type == "far_checkout"]
+    assert len(far_checkout_flags) > 0
+    assert len(clean_flags) < len(far_checkout_flags)
+
+
+@pytest.mark.asyncio
 async def test_skips_employee_with_no_baseline(client, db_session, caplog, unique_email):
     hr_headers = await _hr_headers(client, db_session, caplog, unique_email)
     employee_id = await _make_employee_with_geofence(client, hr_headers, unique_email)

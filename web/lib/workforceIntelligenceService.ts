@@ -119,9 +119,11 @@ export interface EmployeeDeviationFlag {
   self_mean: number;
   self_std: number;
   self_z: number | null;
+  self_n: number | null;
   peer_mean: number;
   peer_std: number;
   peer_z: number | null;
+  peer_n: number | null;
   severity: DeviationSeverity;
   window_start: string;
   window_end: string;
@@ -191,8 +193,43 @@ export async function listImpossibleTravelRejections(
   return response.data;
 }
 
+export interface InsightEvidence {
+  current: string;
+  baseline: string;
+  difference: string;
+  historical_observations: number | null;
+  severity: DeviationSeverity;
+  detection_type: string;
+}
+
+export interface InsightTechnical {
+  metric: string;
+  self_mean: number;
+  self_std: number;
+  self_z: number | null;
+  self_n: number | null;
+  peer_mean: number;
+  peer_std: number;
+  peer_z: number | null;
+  peer_n: number | null;
+}
+
+export interface RecommendedAction {
+  label: string;
+  action: string;
+}
+
+// Requirement 2's human-readable presentation — title/summary/explanation/
+// evidence are the primary view (no metric identifiers or z-scores);
+// `technical` carries the same raw statistics for a "Technical Details"
+// disclosure only.
 export interface WorkforceInsight extends EmployeeDeviationFlag {
+  title: string;
   summary: string;
+  explanation: string;
+  evidence: InsightEvidence;
+  technical: InsightTechnical;
+  recommended_action: RecommendedAction[];
 }
 
 export interface ListInsightsParams {

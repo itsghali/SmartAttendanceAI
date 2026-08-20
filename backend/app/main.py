@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import get_settings
 from app.core.logging_config import configure_logging
+from app.core.scheduler import start_scheduler
 from app.routes import (
     attendance,
     auth,
@@ -14,6 +15,7 @@ from app.routes import (
     face,
     geofences,
     health,
+    notifications,
     problem_reports,
     sessions,
     workforce_intelligence,
@@ -71,7 +73,11 @@ async def lifespan(app: FastAPI):
         from face_recognition import pipeline as face_pipeline
 
         face_pipeline.warm_up()
+
+    scheduler = start_scheduler()
     yield
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
@@ -95,3 +101,4 @@ app.include_router(attendance.router)
 app.include_router(face.router)
 app.include_router(problem_reports.router)
 app.include_router(workforce_intelligence.router)
+app.include_router(notifications.router)

@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, String, Uuid
+from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -66,9 +66,16 @@ class EmployeeDeviationFlag(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     self_mean: Mapped[float] = mapped_column(Float, nullable=False)
     self_std: Mapped[float] = mapped_column(Float, nullable=False)
     self_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Sample size (MetricStats.n) the flag was scored against — nullable
+    # only because rows written before this column existed have none;
+    # detector.py always populates a concrete int going forward. Not read by
+    # detection itself, only by the presentation layer's "N historical
+    # observations" evidence field (see detector.DeviationFlag docstring).
+    self_n: Mapped[int | None] = mapped_column(Integer, nullable=True)
     peer_mean: Mapped[float] = mapped_column(Float, nullable=False)
     peer_std: Mapped[float] = mapped_column(Float, nullable=False)
     peer_z: Mapped[float | None] = mapped_column(Float, nullable=True)
+    peer_n: Mapped[int | None] = mapped_column(Integer, nullable=True)
     severity: Mapped[DeviationSeverity] = mapped_column(Enum(DeviationSeverity), nullable=False)
     window_start: Mapped[date] = mapped_column(Date, nullable=False)
     window_end: Mapped[date] = mapped_column(Date, nullable=False)

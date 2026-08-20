@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useState } from "react";
 
 import { useAuth } from "../lib/auth-context";
 import { listProblemReports } from "../lib/problemReportService";
+import NotificationCenter from "./NotificationCenter";
 import { usePollingExceptions } from "./site-status/usePollingExceptions";
 
 type NavKey =
@@ -107,6 +108,7 @@ export default function AppHeader({
       </div>
       <div className="flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
         {extraActions}
+        <NotificationCenter />
         <span>
           {user?.full_name} ({user?.role})
         </span>
