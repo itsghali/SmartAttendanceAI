@@ -70,6 +70,7 @@ const METRIC_LABELS: Record<string, string> = {
   break_duration_minutes: "Break duration",
   break_count: "Number of breaks",
   geofence_exit_count: "Site exits",
+  checkout_distance_from_checkin_km: "Checkout distance from check-in",
 };
 
 function metricLabel(metric: string): string {
@@ -96,21 +97,71 @@ function formatMetricValue(metric: string, value: number): string {
   if (metric.endsWith("_count")) {
     return String(Math.round(value));
   }
+  if (metric === "checkout_distance_from_checkin_km") {
+    return `${value.toFixed(1)} km`;
+  }
   return formatNum(value);
 }
 
-// Turns the self/peer z-scores into a sentence an HR reader doesn't need
-// a stats background to parse — magnitude in words plus direction, or a
-// plain "broke a fixed pattern" note when there's no self_z (e.g. a count
-// metric that had exactly one value historically).
-function deviationSummary(f: EmployeeDeviationFlag): string {
-  if (f.self_z === null) {
-    return "Broke a pattern that had never varied before";
+// Evidence sentences (Evidence tab only — see evidenceExplanation below):
+// deterministic, per-metric, direction-aware text answering "what actual
+// data caused this to be flagged." Deliberately does NOT reference z-scores
+// or any statistical term — those stay under each card's "Technical
+// details" disclosure. `degenerate` (self_z === null) is detector.py's own
+// zero-variance case: this employee's baseline for this metric has never
+// varied historically, so "differs from the previous recorded pattern" is
+// the honest framing rather than a magnitude comparison.
+function evidenceExplanation(f: EmployeeDeviationFlag): string {
+  const degenerate = f.self_z === null;
+  switch (f.metric) {
+    case "checkin_time_of_day_minutes": {
+      const later = f.observed_value >= f.self_mean;
+      return `Today's check-in occurred substantially ${later ? "later" : "earlier"} than this employee's recent check-in times.`;
+    }
+    case "work_duration_minutes": {
+      const longer = f.observed_value >= f.self_mean;
+      return `Today's recorded work duration is substantially ${longer ? "longer" : "shorter"} than this employee's recent recorded durations.`;
+    }
+    case "break_duration_minutes": {
+      const longer = f.observed_value >= f.self_mean;
+      return `Today's recorded break duration is substantially ${longer ? "longer" : "shorter"} than the employee's recent break durations.`;
+    }
+    case "break_count": {
+      if (degenerate) {
+        return f.observed_value < f.self_mean
+          ? "No break was recorded during this attendance period, which differs from the employee's previous recorded pattern."
+          : "A break was recorded during this attendance period, which differs from the employee's previous recorded pattern (previously none recorded).";
+      }
+      const more = f.observed_value >= f.self_mean;
+      return `The number of breaks recorded today (${more ? "more" : "fewer"} than usual) differs substantially from this employee's recent recorded pattern.`;
+    }
+    case "geofence_exit_count": {
+      if (degenerate) {
+        return f.observed_value > f.self_mean
+          ? "An exit from the assigned site was recorded during the work session, differing from the employee's recent location pattern."
+          : "No exit from the assigned site was recorded, differing from the employee's recent location pattern.";
+      }
+      return "The number of site exits recorded today differs substantially from this employee's usual location pattern.";
+    }
+    case "checkout_distance_from_checkin_km":
+      return "The recorded checkout location is substantially farther from the check-in point than this employee's recent pattern.";
+    default:
+      return "Today's recorded value differs substantially from this employee's recent recorded pattern.";
   }
-  const magnitude = Math.abs(f.self_z);
-  const direction = f.observed_value >= f.self_mean ? "above" : "below";
-  const word = magnitude >= 5 ? "extremely" : magnitude >= 3 ? "highly" : "moderately";
-  return `${word} unusual — ${magnitude.toFixed(1)}× ${direction} this person's usual pattern`;
+}
+
+// Never fabricates a count — displays the real stored value or, when the
+// underlying flag row predates the self_n/peer_n columns (or the peer pool
+// had no data at all), says so explicitly rather than showing a 0 or a
+// blank that could be misread as "zero observations".
+function selfHistoryNote(f: EmployeeDeviationFlag): string {
+  if (f.self_n === null) return "Insufficient historical data";
+  return `Based on ${f.self_n} historical observation${f.self_n === 1 ? "" : "s"}`;
+}
+
+function peerHistoryNote(f: EmployeeDeviationFlag): string {
+  if (!f.peer_n) return "Insufficient historical data";
+  return `Department/peer typical: ${formatMetricValue(f.metric, f.peer_mean)} (from ${f.peer_n} observation${f.peer_n === 1 ? "" : "s"})`;
 }
 
 function AnomalyDetectionPageContent() {
@@ -716,81 +767,105 @@ function AnomalyDetectionPageContent() {
               {flagsError}
             </p>
           )}
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-left text-sm">
-              <thead className="border-y border-zinc-200 bg-zinc-50 text-xs uppercase text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900">
-                <tr>
-                  {!selectedEmployeeId && <th className="px-4 py-2">Employee</th>}
-                  <th className="px-4 py-2">Metric</th>
-                  <th className="px-4 py-2">Observed</th>
-                  <th className="px-4 py-2">What this means</th>
-                  <th
-                    className="px-4 py-2"
-                    title="Self z: how many standard deviations this reading is from the employee's own historical average. Peer z: the same, compared against their department/company peers. 0 = typical, further from 0 = more unusual."
-                  >
-                    Self z / Peer z
-                  </th>
-                  <th className="px-4 py-2">Severity</th>
-                  <th className="px-4 py-2">Occurred</th>
-                  <th className="px-4 py-2">Data source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {flagsLoading && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-6 text-center text-zinc-500">
-                      Loading…
-                    </td>
-                  </tr>
-                )}
-                {!flagsLoading && flags?.items.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-6 text-center text-zinc-500">
-                      No deviation flags — all clear.
-                    </td>
-                  </tr>
-                )}
-                {!flagsLoading &&
-                  flags?.items.map((f) => (
-                    <tr key={f.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-900">
-                      {!selectedEmployeeId && (
-                        <td className="px-4 py-2 text-zinc-900 dark:text-zinc-50">
-                          {employeeName(f.employee_id)}
-                        </td>
-                      )}
-                      <td className="px-4 py-2 text-zinc-900 dark:text-zinc-50">
-                        {metricLabel(f.metric)}
-                      </td>
-                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
+          {flagsLoading && <p className="px-4 pb-4 text-sm text-zinc-500">Loading…</p>}
+          {!flagsLoading && flags?.items.length === 0 && (
+            <p className="px-4 pb-4 text-sm text-zinc-500">No deviation flags — all clear.</p>
+          )}
+          {!flagsLoading && flags && flags.items.length > 0 && (
+            <div className="flex flex-col gap-3 p-4 pt-0">
+              {flags.items.map((f) => (
+                <div
+                  key={f.id}
+                  className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+                >
+                  {/* Employee + Anomaly type */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                      {!selectedEmployeeId && `${employeeName(f.employee_id)} — `}
+                      {metricLabel(f.metric)}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                        {f.is_synthetic ? "Synthetic" : "Live"}
+                      </span>
+                      <span className={severityBadgeClass(f.severity)}>{f.severity}</span>
+                    </div>
+                  </div>
+
+                  {/* Observed value / Historical baseline / Date-time */}
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 rounded border border-zinc-100 bg-zinc-50 p-3 text-xs dark:border-zinc-900 dark:bg-zinc-950 sm:grid-cols-3">
+                    <div>
+                      <dt className="text-zinc-400">Observed</dt>
+                      <dd className="text-zinc-800 dark:text-zinc-200">
                         {formatMetricValue(f.metric, f.observed_value)}
-                      </td>
-                      <td className="max-w-[280px] px-4 py-2 text-zinc-700 dark:text-zinc-300">
-                        {deviationSummary(f)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-zinc-500 dark:text-zinc-500">
-                        {formatZ(f.self_z)} / {formatZ(f.peer_z)}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className={severityBadgeClass(f.severity)}>{f.severity}</span>
-                      </td>
-                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-zinc-400">Typical (baseline)</dt>
+                      <dd className="text-zinc-800 dark:text-zinc-200">
+                        {formatMetricValue(f.metric, f.self_mean)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-zinc-400">Date/time</dt>
+                      <dd className="text-zinc-800 dark:text-zinc-200">
                         {new Date(f.occurred_at).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                          {f.is_synthetic ? "Synthetic" : "Live"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {/* Short explanation of why the system flagged it */}
+                  <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                    {evidenceExplanation(f)}
+                  </p>
+
+                  {/* Relevant historical comparison */}
+                  <div className="flex flex-col gap-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span>{selfHistoryNote(f)}</span>
+                    <span>{peerHistoryNote(f)}</span>
+                  </div>
+
+                  <details className="text-xs text-zinc-500">
+                    <summary className="cursor-pointer select-none">Technical details</summary>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 font-mono sm:grid-cols-3">
+                      <div>
+                        <dt className="text-zinc-400">self_z</dt>
+                        <dd>{formatZ(f.self_z)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">peer_z</dt>
+                        <dd>{formatZ(f.peer_z)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">self_std</dt>
+                        <dd>{formatMetricValue(f.metric, f.self_std)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">peer_std</dt>
+                        <dd>{formatMetricValue(f.metric, f.peer_std)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">window</dt>
+                        <dd>
+                          {f.window_start} → {f.window_end}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-zinc-400">detected_at</dt>
+                        <dd>{new Date(f.detected_at).toLocaleString()}</dd>
+                      </div>
+                    </dl>
+                  </details>
+                </div>
+              ))}
+            </div>
+          )}
           {flags && flags.items.length > 0 && (
             <p className="px-4 pb-3 text-xs text-zinc-400">
-              &quot;Self z / Peer z&quot; is the raw statistical measure behind the plain-English
-              summary — 0 is typical, the further from 0 the more unusual. Kept here for audit
-              purposes.
+              Data source is the underlying attendance record this flag was computed from — Live
+              (real check-in/break/geofence data) or Synthetic (generated test data, never shown
+              to a real employee). Raw statistical values are under each card&apos;s
+              &quot;Technical details&quot;, for audit purposes only.
             </p>
           )}
           {flags && flags.total > PAGE_SIZE && (

@@ -1,0 +1,20 @@
+
+> web@0.1.0 dev
+> next dev -p 3100
+
+▲ Next.js 16.3.0 (Turbopack)
+- Local:         http://localhost:3100
+- Network:       http://172.20.10.2:3100
+- Environments: .env.local
+✓ Ready in 380ms
+✓ Running next.config.ts took 33ms
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          9536
+- Dir:          C:\Users\ghali\Desktop\SmartAttendanceAI\web
+- Log:          .next\dev\logs\next-development.log
+
+You can access the existing server at http://localhost:3000,
+or run taskkill /PID 9536 /F to stop it and start a new one.
+[?25h
