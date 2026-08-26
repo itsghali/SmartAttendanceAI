@@ -2,23 +2,20 @@
 
 Intelligent attendance management platform: GPS geofencing, facial recognition, real-time tracking, and AI fraud detection (GPS spoofing, impossible travel, buddy punching). Employees check in/out only inside authorized zones after identity verification.
 
-**Status:** Auth+RBAC, Employee+Department, Attendance+GPS+Geofencing, and Face Enrollment+Verification modules complete on the backend (real, tested, live-verified — 121 backend tests). Face verification is now wired into check-in (`FACE_VERIFICATION_ENABLED`, off by default) — geofence match and, once enabled, a live selfie match against the employee's enrolled embedding, both required. Mobile has check-in/check-out/breaks plus a selfie-capture step (`expo-camera`) wired end-to-end to the live backend; the camera permission/capture UX itself still needs a live walkthrough on real hardware (see `TODOS.md`). Everything else — leave/remote-work, fraud models, dashboards, web UI beyond auth/geofences — is built module-by-module from here. See `DEVELOPMENT_LOG.md` and `TODOS.md`.
+**Status:** Backend is feature-complete and tested across Auth+RBAC, Employee+Department, Attendance+GPS+Geofencing, Face Enrollment+Verification, Problem Reports, Notifications, and Workforce Intelligence — anomaly/deviation detection built on statistical z-scores against each employee's own baseline, not a trained ML model (230 backend tests, plus further tests inside the `ai/` packages). Face verification is wired into check-in/out and breaks (`FACE_VERIFICATION_ENABLED`, off by default) — geofence match and, once enabled, a live selfie match against the employee's enrolled embedding, both required. The web dashboard covers geofences, employees, face enrollment, live site-status monitoring, problem reports, supervisor team corrections, and a full anomaly-detection review UI (insights, evidence, baselines, reviewer workflow) — not just auth/geofences. Mobile has check-in/check-out/breaks, geofence status banners, history, and problem reporting, plus a selfie-capture step (`expo-camera`) wired end-to-end to the live backend and mock-location/jailbreak integrity signals; the camera permission/capture UX itself still needs a live walkthrough on real hardware. Not yet built: a leave/remote-work request-and-approval workflow, and a landing page for the `auditor` role on web. `scikit-learn`/`xgboost`/`shap`/`torch` remain declared but unused `ai/` dependencies — only `onnxruntime` (face recognition) is actually used for inference.
 
 ## Monorepo layout
 
 | Path | Stack | Purpose |
 |---|---|---|
-| `backend/` | FastAPI, SQLAlchemy, PostGIS | REST API, auth, business logic |
+| `backend/` | FastAPI, SQLAlchemy, PostGIS | REST API, auth, business logic, attendance/geofencing, workforce intelligence |
 | `web/` | Next.js (App Router), TypeScript, Tailwind | Admin/HR dashboard |
 | `mobile/` | Expo, React Native, TypeScript | Employee app (check-in/out, GPS, face) |
-| `ai/` | scikit-learn, XGBoost, SHAP, PyTorch/ONNX | Fraud detection, face recognition |
-| `database/` | Alembic | Schema migrations, seed scripts |
-| `docker/` | Docker Compose | Local dev infra (Postgres+PostGIS, Redis) |
-| `docs/` | — | Architecture, API docs |
-| `scripts/` | — | One-off ops/dev scripts |
-| `tests/` | — | Cross-service integration/e2e tests |
+| `ai/` | insightface/ONNX (face), statistics (workforce intelligence) | Face recognition embeddings, anomaly/deviation detection, impossible-travel heuristic |
+| `database/` | Alembic | Schema migrations (`database/migrations/`) |
+| `docker/` | Docker Compose | Local dev infra (Postgres+PostGIS, Redis, backend) |
 
-Each module has its own README with setup/run/test commands.
+There's no top-level `docs/`, `scripts/`, or `tests/` — one-off scripts live in `backend/scripts/` and `ai/workforce_intelligence/scripts/`, and tests live inside each module (`backend/tests/`, `web/tests/`, `ai/*/tests/`).
 
 ## Quickstart
 
@@ -61,6 +58,7 @@ Every account below was verified working (`HTTP 200` on `/auth/login`) at the ti
 | users:read | ✓ | ✓ | ✓ | ✓ | – | ✓ |
 | users:write | ✓ | ✓ | ✓ | – | – | – |
 | users:delete | ✓ | ✓ | ✓ | – | – | – |
+| roles:manage | ✓ | – | – | – | – | – |
 | **Device Management** |
 | devices:read:own | ✓ | – | – | – | ✓ | – |
 | devices:manage:own | ✓ | – | – | – | ✓ | – |
@@ -78,6 +76,13 @@ Every account below was verified working (`HTTP 200` on `/auth/login`) at the ti
 | attendance:read:own | ✓ | – | – | – | ✓ | – |
 | attendance:read:all | ✓ | ✓ | ✓ | ✓* | – | ✓ |
 | attendance:correct | ✓ | ✓ | ✓ | ✓ | – | – |
+| **Problem Reports** |
+| problem_reports:create:own | ✓ | – | – | – | ✓ | – |
+| problem_reports:read:all | ✓ | ✓ | ✓ | ✓ | – | – |
+| problem_reports:resolve | ✓ | ✓ | ✓ | ✓ | – | – |
+| **Workforce Intelligence** |
+| workforce_intelligence:read | ✓ | ✓ | ✓ | – | – | – |
+| workforce_intelligence:write | ✓ | ✓ | ✓ | – | – | – |
 | **Audit & Compliance** |
 | audit_logs:read | ✓ | ✓ | ✓ | – | – | ✓ |
 
@@ -86,6 +91,7 @@ Every account below was verified working (`HTTP 200` on `/auth/login`) at the ti
 - `hr_manager` identical to `admin` except missing `devices:manage:all` and `sessions:manage:all` (no device/session admin powers).
 - `supervisor` has `attendance:read:all` scoped to department only (enforced at route level, not role-wide).
 - `supervisor` deliberately excluded from `geofence_events:read` — kept off geofence-exit/exceptions/history screens by design.
+- `supervisor` deliberately excluded from `workforce_intelligence:*` — those endpoints are workforce-wide, not team-scoped.
 - `auditor` is read-only; `audit_logs:read` is present but has no backend feature (no logs table/endpoint exists).
 
 **Employees in a specific attendance state** — no setup needed, they are already in it:
@@ -139,7 +145,7 @@ docker logs docker-backend-1 2>&1 | grep "hr@example.com" | grep -o "verificatio
 curl -s -X POST $BASE/auth/verify-email -H "Content-Type: application/json" \
   -d '{"email":"hr@example.com","code":"<OTP>"}'
 
-# 3. Promote to hr_manager (no API for role assignment yet — see TODOS.md)
+# 3. Promote to hr_manager (no API for role assignment yet)
 docker exec docker-postgres-1 psql -U postgres -d smartattendance \
   -c "UPDATE users SET role_id=(SELECT id FROM roles WHERE name='hr_manager') WHERE email='hr@example.com';"
 
@@ -231,7 +237,7 @@ done
 
 Ping 3 returns `{"status":"exited","event_fired":"exit"}`. Reload the app to see the amber banner. Send a ping back inside the zone (`33.5731,-7.5898`) with a higher `ping_seq` to fire `RETURN`. The endpoint is rate-limited to 10 pings/minute per employee.
 
-That same debounced `EXIT` also auto-starts a `BreakPeriod` (`source=geofence_exit`) — unlike a manual break, pings keep being processed while it's open so a `RETURN` can auto-close it; checking out while it's still open closes it too, using the checkout's own position. See `autoexit@example.com` above for a permanently-seeded example, or `TODOS.md` / `AI-CHANGELOG.md` for the design writeup.
+That same debounced `EXIT` also auto-starts a `BreakPeriod` (`source=geofence_exit`) — unlike a manual break, pings keep being processed while it's open so a `RETURN` can auto-close it; checking out while it's still open closes it too, using the checkout's own position. See `autoexit@example.com` above for a permanently-seeded example.
 
 ## Why Python 3.11 for backend/ and ai/
 
@@ -239,4 +245,4 @@ System default is Python 3.14; PyTorch/ONNX Runtime/scikit-learn/XGBoost don't r
 
 ## Development process
 
-This project builds incrementally, module by module: design → implement → test → document → validate, before moving to the next module. See `CHANGELOG.md` for versioned releases and `DEVELOPMENT_LOG.md` for the full timestamped build history.
+This project builds incrementally, module by module: design → implement → test → document → validate, before moving to the next module.
