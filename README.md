@@ -1,17 +1,46 @@
 # SmartAttendanceAI
 
-Intelligent attendance management platform: GPS geofencing, facial recognition, real-time tracking, and AI fraud detection (GPS spoofing, impossible travel, buddy punching). Employees check in/out only inside authorized zones after identity verification.
+**Location- and identity-verified attendance tracking**, with statistical anomaly detection to catch GPS spoofing, impossible travel, and buddy punching.
 
-**Status:** Backend is feature-complete and tested across Auth+RBAC, Employee+Department, Attendance+GPS+Geofencing, Face Enrollment+Verification, Problem Reports, Notifications, and Workforce Intelligence — anomaly/deviation detection built on statistical z-scores against each employee's own baseline, not a trained ML model (230 backend tests, plus further tests inside the `ai/` packages). Face verification is wired into check-in/out and breaks (`FACE_VERIFICATION_ENABLED`, off by default) — geofence match and, once enabled, a live selfie match against the employee's enrolled embedding, both required. The web dashboard covers geofences, employees, face enrollment, live site-status monitoring, problem reports, supervisor team corrections, and a full anomaly-detection review UI (insights, evidence, baselines, reviewer workflow) — not just auth/geofences. Mobile has check-in/check-out/breaks, geofence status banners, history, and problem reporting, plus a selfie-capture step (`expo-camera`) wired end-to-end to the live backend and mock-location/jailbreak integrity signals; the camera permission/capture UX itself still needs a live walkthrough on real hardware. Not yet built: a leave/remote-work request-and-approval workflow, and a landing page for the `auditor` role on web. `scikit-learn`/`xgboost`/`shap`/`torch` remain declared but unused `ai/` dependencies — only `onnxruntime` (face recognition) is actually used for inference.
+![Python](https://img.shields.io/badge/python-3.11-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688)
+![Next.js](https://img.shields.io/badge/Next.js-16-black)
+![Expo](https://img.shields.io/badge/React%20Native-Expo%2054-4630EB)
+![PostGIS](https://img.shields.io/badge/PostgreSQL-PostGIS-336791)
+![Backend tests](https://img.shields.io/badge/backend%20tests-230%2B-success)
 
-## Monorepo layout
+Employees check in only from inside an authorized geofence, after a live selfie match against their enrolled face. Every check-in feeds a per-employee statistical baseline that flags deviations — off-hours activity, impossible travel between sites, patterns that don't match the employee's own history — for HR review.
 
-| Path | Stack | Purpose |
+Built incrementally and shipped module by module: design → implement → test → document → validate, before moving to the next one.
+
+## What it does
+
+**Backend (FastAPI) — feature-complete, 230+ tests**
+- **Auth & RBAC** — 6 roles (`super_admin`, `admin`, `hr_manager`, `supervisor`, `employee`, `auditor`), permission-gated at the route level
+- **Attendance & GPS geofencing** — check-in/out, breaks, real-time `ENTER`/`EXIT`/`RETURN` events, auto-started breaks on geofence exit
+- **Face enrollment & verification** — ArcFace embeddings via `insightface`/ONNX, passive liveness scoring, gated behind `FACE_VERIFICATION_ENABLED` (off by default)
+- **Workforce Intelligence** — anomaly/deviation detection against each employee's own statistical baseline (z-score, not a trained ML model), reviewer workflow, synthetic-data generator for bootstrapping history
+- **Problem reports & notifications**
+
+**Web dashboard (Next.js)**
+Geofence management, employee/department administration, face enrollment, live site-status monitoring, a problem-report inbox, supervisor team corrections, and a full Workforce Intelligence review UI (insights, evidence, per-employee baselines).
+
+**Mobile app (Expo / React Native)**
+Check-in/out and breaks with selfie capture wired to live face verification, geofence status banners, attendance history, problem reporting, and device-integrity signals (mock-location and jailbreak/root detection).
+
+**Not yet built**
+- Leave / remote-work request-and-approval workflow
+- An `auditor`-role landing page on web
+- `scikit-learn` / `xgboost` / `shap` / `torch` are declared `ai/` dependencies but currently unused — inference only runs on `onnxruntime`
+
+## Tech stack
+
+| Module | Stack | Purpose |
 |---|---|---|
-| `backend/` | FastAPI, SQLAlchemy, PostGIS | REST API, auth, business logic, attendance/geofencing, workforce intelligence |
+| `backend/` | FastAPI, SQLAlchemy, PostGIS | REST API, auth, attendance/geofencing, workforce intelligence |
 | `web/` | Next.js (App Router), TypeScript, Tailwind | Admin/HR dashboard |
 | `mobile/` | Expo, React Native, TypeScript | Employee app (check-in/out, GPS, face) |
-| `ai/` | insightface/ONNX (face), statistics (workforce intelligence) | Face recognition embeddings, anomaly/deviation detection, impossible-travel heuristic |
+| `ai/` | `insightface`/ONNX (face), statistics (workforce intelligence) | Face recognition embeddings, anomaly/deviation detection, impossible-travel heuristic |
 | `database/` | Alembic | Schema migrations (`database/migrations/`) |
 | `docker/` | Docker Compose | Local dev infra (Postgres+PostGIS, Redis, backend) |
 
@@ -19,7 +48,7 @@ There's no top-level `docs/`, `scripts/`, or `tests/` — one-off scripts live i
 
 ## Quickstart
 
-```
+```bash
 cd docker && docker compose up -d postgres redis
 cd ../backend && py -3.11 -m venv .venv && .venv/Scripts/activate && pip install -r requirements-dev.txt && copy .env.example .env
 cd ../database && alembic upgrade head
@@ -30,9 +59,9 @@ cd ../mobile && npm install && copy .env.example .env && npm start
 
 Postgres binds host port **55432** (not the default 5432) — this machine already had something on 5432, so the compose file remaps it. Adjust `DATABASE_URL`/`alembic.ini` if you deploy elsewhere and want the default back.
 
-## Web dashboard signup
+## Configuration: web dashboard signup
 
-`web/app/register` lets HR/Admin/SuperAdmin self-signup (name, email, phone, password, role — admin/hr_manager/super_admin) instead of hand-crafting accounts. It's gated: the form also asks for a **setup code**, checked server-side against `ADMIN_SIGNUP_CODE` in `backend/.env`. Unset → every privileged signup request is rejected (fail-closed), so this is safe to leave off until you actually want it. Generate one and set it before anyone needs to self-signup on web:
+`web/app/register` lets HR/Admin/SuperAdmin self-signup (name, email, phone, password, role — `admin`/`hr_manager`/`super_admin`) instead of hand-crafting accounts. It's gated behind a **setup code**, checked server-side against `ADMIN_SIGNUP_CODE` in `backend/.env`. Unset → every privileged signup request is rejected (fail-closed), so it's safe to leave off until you actually want it:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(18))"
@@ -40,15 +69,33 @@ python -c "import secrets; print(secrets.token_urlsafe(18))"
 
 Put the value in `backend/.env` as `ADMIN_SIGNUP_CODE=...` (and the deployment's env vars if not local), then share it out-of-band with whoever should be able to create HR/Admin/SuperAdmin accounts. Mobile signup (employees) never asks for this — it always defaults to the `employee` role.
 
-## Local test accounts
+## Seeing geofence exit monitoring work
+
+Check-in only records an `ENTER` event. `EXIT` needs 3 consecutive out-of-zone pings (60 s apart in the app, so ~3 min), which is slow to reproduce by hand. Drive it directly instead — `ping_seq` must increase, since repeats are deduped:
+
+```bash
+BASE=http://localhost:8000
+TOKEN=$(curl -s -X POST $BASE/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"test1@example.com","password":"Test12345"}' | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+for s in 1 2 3; do
+  curl -s -X POST $BASE/attendance/location-ping -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"latitude\":34.5,\"longitude\":-7.5898,\"accuracy_meters\":10,\"ping_seq\":$s}"; echo
+done
+```
+
+Ping 3 returns `{"status":"exited","event_fired":"exit"}`. Reload the app to see the amber banner. Send a ping back inside the zone (`33.5731,-7.5898`) with a higher `ping_seq` to fire `RETURN`. The endpoint is rate-limited to 10 pings/minute per employee.
+
+That same debounced `EXIT` also auto-starts a `BreakPeriod` (`source=geofence_exit`) — unlike a manual break, pings keep being processed while it's open so a `RETURN` can auto-close it; checking out while it's still open closes it too, using the checkout's own position. See `autoexit@example.com` in the [local development reference](#local-development-reference) for a permanently-seeded example.
+
+## Local development reference
+
+<details>
+<summary><strong>Local test accounts, RBAC matrix, GPS override, and account-recreation scripts</strong></summary>
 
 > **Local dev only.** These exist in the local Docker Postgres volume, seeded by hand for manual testing. They are throwaway credentials for a database that never leaves this machine — never create accounts like these in a deployed environment, and never point this repo's `.env` at a real database while they exist.
 
 Every account below was verified working (`HTTP 200` on `/auth/login`) at the time of writing — except `offboard@example.com`, which returns `403 {"detail":"account is deactivated"}` on purpose. If another one stops working, the local Postgres volume was probably reset — recreate it with the recipe further down.
-
-**One per role** — use these to check RBAC (`403` vs `200`) on any endpoint:
-
- 
 
 ### Permissions by role
 
@@ -94,7 +141,9 @@ Every account below was verified working (`HTTP 200` on `/auth/login`) at the ti
 - `supervisor` deliberately excluded from `workforce_intelligence:*` — those endpoints are workforce-wide, not team-scoped.
 - `auditor` is read-only; `audit_logs:read` is present but has no backend feature (no logs table/endpoint exists).
 
-**Employees in a specific attendance state** — no setup needed, they are already in it:
+### Employees in a specific attendance state
+
+No setup needed, they are already in it:
 
 | Email | Password | State |
 |---|---|---|
@@ -221,28 +270,8 @@ curl -s -X PATCH $BASE/employees/<onbreak_employee_id> -H "Authorization: Bearer
   -H "Content-Type: application/json" -d '{"supervisor_id":"<supervisor_employee_id>"}'
 ```
 
-### Seeing geofence exit monitoring work
+</details>
 
-Check-in only records an `ENTER` event. `EXIT` needs 3 consecutive out-of-zone pings (60 s apart in the app, so ~3 min), which is slow to reproduce by hand. Drive it directly instead — `ping_seq` must increase, since repeats are deduped:
-
-```bash
-TOKEN=$(curl -s -X POST $BASE/auth/login -H "Content-Type: application/json" \
-  -d '{"email":"test1@example.com","password":"Test12345"}' | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-for s in 1 2 3; do
-  curl -s -X POST $BASE/attendance/location-ping -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"latitude\":34.5,\"longitude\":-7.5898,\"accuracy_meters\":10,\"ping_seq\":$s}"; echo
-done
-```
-
-Ping 3 returns `{"status":"exited","event_fired":"exit"}`. Reload the app to see the amber banner. Send a ping back inside the zone (`33.5731,-7.5898`) with a higher `ping_seq` to fire `RETURN`. The endpoint is rate-limited to 10 pings/minute per employee.
-
-That same debounced `EXIT` also auto-starts a `BreakPeriod` (`source=geofence_exit`) — unlike a manual break, pings keep being processed while it's open so a `RETURN` can auto-close it; checking out while it's still open closes it too, using the checkout's own position. See `autoexit@example.com` above for a permanently-seeded example.
-
-## Why Python 3.11 for backend/ and ai/
+## Why Python 3.11 for `backend/` and `ai/`
 
 System default is Python 3.14; PyTorch/ONNX Runtime/scikit-learn/XGBoost don't reliably ship wheels for brand-new CPython releases yet. `backend/.venv` and `ai/.venv` are pinned to 3.11 (`py -3.11 -m venv .venv`) to avoid source-build failures.
-
-## Development process
-
-This project builds incrementally, module by module: design → implement → test → document → validate, before moving to the next module.
