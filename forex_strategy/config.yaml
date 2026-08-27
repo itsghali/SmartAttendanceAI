@@ -1,0 +1,101 @@
+# =============================================================================
+# Research-Grade Forex Backtesting System — Configuration
+# =============================================================================
+# Every numeric assumption used anywhere in the strategy or backtest engine
+# lives here. Nothing in the codebase should hard-code a threshold that is
+# meant to be a strategy parameter.
+# =============================================================================
+
+timeframe: M30
+
+# ---------------------------------------------------------------------------
+# Indicators
+# ---------------------------------------------------------------------------
+ma_period: 200              # SMA period used as the take-profit target
+atr_period: 14               # Wilder ATR period
+
+# ---------------------------------------------------------------------------
+# Swing detection (zones/swings.py)
+# ---------------------------------------------------------------------------
+swing_lookback: 5            # candles required on BOTH sides to confirm a swing
+
+# ---------------------------------------------------------------------------
+# Base / displacement / structure-break (zones/supply_demand.py)
+# ---------------------------------------------------------------------------
+base_max_candles: 3                     # maximum candles allowed in a base
+displacement_min_atr_multiplier: 1.5    # displacement_range >= ATR * multiplier
+zone_invalidation_buffer_atr: 0.10      # invalidation buffer, in units of ATR
+zone_max_age_bars: 500                  # zone EXPIREs if never retested within N bars
+
+# ---------------------------------------------------------------------------
+# Stop loss
+# ---------------------------------------------------------------------------
+sl_buffer_atr_multiplier: 0.10   # SL = zone boundary +/- ATR * multiplier
+max_sl_pips: 20                  # hard filter — test both 15 and 20 (see below)
+
+# ---------------------------------------------------------------------------
+# Risk / reward
+# ---------------------------------------------------------------------------
+min_rr: 1.0                      # baseline; also test 1.5 and 2.0
+
+# ---------------------------------------------------------------------------
+# Position sizing
+# ---------------------------------------------------------------------------
+initial_capital: 100000
+risk_per_trade: 0.01             # 1% of current equity per trade
+lot_size: 100000                 # units per standard lot
+lot_step: 0.01                   # broker minimum lot increment (rounded down)
+min_lot: 0.01
+
+# USD/JPY is not one of the four traded pairs, so GBP/JPY pip value (JPY) must
+# be converted to USD using a reference rate. This is a documented,
+# configurable approximation — see README section "Resolved Ambiguities".
+usdjpy_conversion_rate: 150.0
+
+# ---------------------------------------------------------------------------
+# Transaction costs (configurable per run for sensitivity testing)
+# ---------------------------------------------------------------------------
+transaction_costs:
+  EURUSD: {spread_pips: 1.0, slippage_pips: 0.3}
+  GBPUSD: {spread_pips: 1.5, slippage_pips: 0.3}
+  GBPJPY: {spread_pips: 2.5, slippage_pips: 0.5}
+  AUDUSD: {spread_pips: 1.5, slippage_pips: 0.3}
+commission_per_lot_round_turn: 7.0   # USD, charged per standard lot traded (round turn)
+
+# ---------------------------------------------------------------------------
+# Same-candle SL/TP ambiguity resolution
+# ---------------------------------------------------------------------------
+same_candle_policy: SL_FIRST     # SL_FIRST | TP_FIRST
+
+# ---------------------------------------------------------------------------
+# Trading rules
+# ---------------------------------------------------------------------------
+max_open_trades_per_pair: 1
+
+# ---------------------------------------------------------------------------
+# Pairs and pip sizes
+# ---------------------------------------------------------------------------
+pairs:
+  EURUSD: {pip_size: 0.0001, file: "data/raw/EURUSD_M30.csv"}
+  GBPUSD: {pip_size: 0.0001, file: "data/raw/GBPUSD_M30.csv"}
+  GBPJPY: {pip_size: 0.01,   file: "data/raw/GBPJPY_M30.csv"}
+  AUDUSD: {pip_size: 0.0001, file: "data/raw/AUDUSD_M30.csv"}
+
+# ---------------------------------------------------------------------------
+# Out-of-sample / walk-forward
+# ---------------------------------------------------------------------------
+in_sample_fraction: 0.6          # first 60% of the dataset = training/in-sample
+walk_forward:
+  train_bars: 4000
+  test_bars: 1000
+  step_bars: 1000
+
+# ---------------------------------------------------------------------------
+# Sensitivity analysis grids
+# ---------------------------------------------------------------------------
+sensitivity:
+  max_sl_pips: [15, 20]
+  min_rr: [1.0, 1.5, 2.0]
+  displacement_min_atr_multiplier: [1.0, 1.5, 2.0]
+  swing_lookback: [3, 5, 8]
+  sl_buffer_atr_multiplier: [0.05, 0.10, 0.20]

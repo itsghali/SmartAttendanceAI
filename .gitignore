@@ -54,6 +54,16 @@ Thumbs.db
 # scratch markdown docs
 *.md
 !backend/scripts/face_eval_results/report_section.md
+!forex_strategy/README.md
+!forex_strategy/outputs/reports/research_report.md
+
+# forex_strategy: regenerate via `python forex_strategy/main.py` (synthetic
+# data is deterministic given the seed; real data belongs in data/raw/ but
+# should not be committed here)
+forex_strategy/data/raw/*.csv
+forex_strategy/outputs/trade_logs/*.csv
+forex_strategy/outputs/charts/*.png
+forex_strategy/outputs/equity_curves/*.png
 *.docx
 *.claude
 .vercel
